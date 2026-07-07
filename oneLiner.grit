@@ -1,0 +1,82 @@
+engine biome(0.1)
+language js
+
+// Collapse single-statement blocks into one-liners.
+//
+// Mirrors scripts/refactor-one-liners.ts:
+//   if (cond) { return x; }      ->  if (cond) return x;
+//   if (cond) { stmt; }          ->  if (cond) stmt;
+//   else if (cond) { stmt; }     ->  else if (cond) stmt;
+//   else { stmt; }               ->  else stmt;
+//   for (...) { stmt; }          ->  for (...) stmt;
+//   while (cond) { stmt; }       ->  while (cond) stmt;
+//
+// A block is left untouched when its single statement:
+//   - is itself a control-flow statement (if / for / while / switch),
+//     matching the original script and avoiding dangling-else hazards;
+//   - is a lexical declaration (let / const / class / function), which
+//     cannot legally be the sole body of a control-flow statement; or
+//   - contains a comment, so no documentation is silently dropped.
+
+or {
+    // `if (cond) { stmt; }` and `if (cond) { stmt; } else ...`.
+    // The else clause, when present, is preserved verbatim.
+    JsIfStatement(test=$cond, consequent=$block, else_clause=$else) as $if where {
+        $block <: JsBlockStatement(statements=[$s]),
+        not $block <: or { r"[\s\S]*//[\s\S]*", r"[\s\S]*/\*[\s\S]*" },
+        not $s <: or { r"let[^\w][\s\S]*", r"const[^\w][\s\S]*", r"class[^\w][\s\S]*", r"function[^\w][\s\S]*" },
+        not $s <: or { JsIfStatement($_, $_), JsForStatement($_, $_, $_, $_), JsForInStatement($_, $_, $_), JsForOfStatement($_, $_, $_), JsWhileStatement($_, $_), JsSwitchStatement($_, $_) },
+        register_diagnostic(span=$if, message="Collapse this single-statement block into a one-liner.", severity="warn", fix_kind="safe"),
+        $if => `if ($cond) $s $else`
+    },
+
+    // `... else { stmt; }` — collapse the else branch's block.
+    JsIfStatement(test=$cond, consequent=$cons, else_clause=JsElseClause(alternate=$block)) as $if2 where {
+        $block <: JsBlockStatement(statements=[$s]),
+        not $block <: or { r"[\s\S]*//[\s\S]*", r"[\s\S]*/\*[\s\S]*" },
+        not $s <: or { r"let[^\w][\s\S]*", r"const[^\w][\s\S]*", r"class[^\w][\s\S]*", r"function[^\w][\s\S]*" },
+        not $s <: or { JsIfStatement($_, $_), JsForStatement($_, $_, $_, $_), JsForInStatement($_, $_, $_), JsForOfStatement($_, $_, $_), JsWhileStatement($_, $_), JsSwitchStatement($_, $_) },
+        register_diagnostic(span=$if2, message="Collapse this single-statement block into a one-liner.", severity="warn", fix_kind="safe"),
+        $if2 => `if ($cond) $cons else $s`
+    },
+
+    // `for (init; test; update) { stmt; }`
+    JsForStatement(initializer=$init, test=$test, update=$update, body=$block) as $for1 where {
+        $block <: JsBlockStatement(statements=[$s]),
+        not $block <: or { r"[\s\S]*//[\s\S]*", r"[\s\S]*/\*[\s\S]*" },
+        not $s <: or { r"let[^\w][\s\S]*", r"const[^\w][\s\S]*", r"class[^\w][\s\S]*", r"function[^\w][\s\S]*" },
+        not $s <: or { JsIfStatement($_, $_), JsForStatement($_, $_, $_, $_), JsForInStatement($_, $_, $_), JsForOfStatement($_, $_, $_), JsWhileStatement($_, $_), JsSwitchStatement($_, $_) },
+        register_diagnostic(span=$for1, message="Collapse this single-statement block into a one-liner.", severity="warn", fix_kind="safe"),
+        $for1 => `for ($init; $test; $update) $s`
+    },
+
+    // `for (init of iter) { stmt; }`
+    JsForOfStatement(initializer=$init, expression=$expr, body=$block) as $for2 where {
+        $block <: JsBlockStatement(statements=[$s]),
+        not $block <: or { r"[\s\S]*//[\s\S]*", r"[\s\S]*/\*[\s\S]*" },
+        not $s <: or { r"let[^\w][\s\S]*", r"const[^\w][\s\S]*", r"class[^\w][\s\S]*", r"function[^\w][\s\S]*" },
+        not $s <: or { JsIfStatement($_, $_), JsForStatement($_, $_, $_, $_), JsForInStatement($_, $_, $_), JsForOfStatement($_, $_, $_), JsWhileStatement($_, $_), JsSwitchStatement($_, $_) },
+        register_diagnostic(span=$for2, message="Collapse this single-statement block into a one-liner.", severity="warn", fix_kind="safe"),
+        $for2 => `for ($init of $expr) $s`
+    },
+
+    // `for (init in obj) { stmt; }`
+    JsForInStatement(initializer=$init, expression=$expr, body=$block) as $for3 where {
+        $block <: JsBlockStatement(statements=[$s]),
+        not $block <: or { r"[\s\S]*//[\s\S]*", r"[\s\S]*/\*[\s\S]*" },
+        not $s <: or { r"let[^\w][\s\S]*", r"const[^\w][\s\S]*", r"class[^\w][\s\S]*", r"function[^\w][\s\S]*" },
+        not $s <: or { JsIfStatement($_, $_), JsForStatement($_, $_, $_, $_), JsForInStatement($_, $_, $_), JsForOfStatement($_, $_, $_), JsWhileStatement($_, $_), JsSwitchStatement($_, $_) },
+        register_diagnostic(span=$for3, message="Collapse this single-statement block into a one-liner.", severity="warn", fix_kind="safe"),
+        $for3 => `for ($init in $expr) $s`
+    },
+
+    // `while (cond) { stmt; }`
+    JsWhileStatement(test=$cond, body=$block) as $while1 where {
+        $block <: JsBlockStatement(statements=[$s]),
+        not $block <: or { r"[\s\S]*//[\s\S]*", r"[\s\S]*/\*[\s\S]*" },
+        not $s <: or { r"let[^\w][\s\S]*", r"const[^\w][\s\S]*", r"class[^\w][\s\S]*", r"function[^\w][\s\S]*" },
+        not $s <: or { JsIfStatement($_, $_), JsForStatement($_, $_, $_, $_), JsForInStatement($_, $_, $_), JsForOfStatement($_, $_, $_), JsWhileStatement($_, $_), JsSwitchStatement($_, $_) },
+        register_diagnostic(span=$while1, message="Collapse this single-statement block into a one-liner.", severity="warn", fix_kind="safe"),
+        $while1 => `while ($cond) $s`
+    }
+}

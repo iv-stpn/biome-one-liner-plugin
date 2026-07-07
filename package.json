@@ -1,0 +1,40 @@
+{
+  "name": "biome-one-liner-plugin",
+  "version": "1.0.0",
+  "description": "Biome plugin that collapses single-statement blocks into one-liners.",
+  "license": "ISC",
+  "author": "Ivan Stepanian <iv.stpn@gmail.com>",
+  "type": "commonjs",
+  "keywords": [
+    "biome",
+    "biome-plugin",
+    "gritql",
+    "lint",
+    "formatter"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/iv-stpn/biome-one-liner-plugin.git"
+  },
+  "homepage": "https://github.com/iv-stpn/biome-one-liner-plugin#readme",
+  "bugs": {
+    "url": "https://github.com/iv-stpn/biome-one-liner-plugin/issues"
+  },
+  "files": [
+    "oneLiner.grit",
+    "README.md",
+    "CHANGELOG.md"
+  ],
+  "scripts": {
+    "test": "node tests/run.mjs",
+    "version": "changeset version",
+    "release": "changeset publish"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.5.2",
+    "@changesets/cli": "^2.31.0"
+  }
+}

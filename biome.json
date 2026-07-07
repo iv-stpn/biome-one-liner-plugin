@@ -1,0 +1,16 @@
+{
+	"$schema": "./node_modules/@biomejs/biome/configuration_schema.json",
+	"plugins": [
+		"./oneLiner.grit"
+	],
+	"files": {
+		"includes": [
+			"**/*.js",
+			"**/*.jsx",
+			"**/*.ts",
+			"**/*.tsx",
+			"**/*.mjs",
+			"**/*.cjs"
+		]
+	}
+}

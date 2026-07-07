@@ -1,0 +1,8 @@
+{
+	"plugins": ["../oneLiner.grit"],
+	"linter": {
+		"rules": {
+			"recommended": false
+		}
+	}
+}
