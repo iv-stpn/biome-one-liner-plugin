@@ -1,8 +1,6 @@
 # biome-one-liner-plugin
 
-A [Biome](https://biomejs.dev) plugin (GritQL) that collapses single-statement
-blocks into one-liners — a Biome-native port of
-`offkeep/scripts/refactor-one-liners.ts`.
+A [Biome](https://biomejs.dev) plugin (written in [GritQL](https://biomejs.dev/blog/gritql-biome)) that collapses single-statement blocks into one-liners — turning the verbose form on the left into the tidy form on the right.
 
 ```ts
 // before
@@ -43,17 +41,13 @@ Multi-statement blocks are left untouched.
 
 A single-statement block is **not** collapsed when its statement:
 
-- **is itself control flow** (`if` / `for` / `while` / `switch`) — matches the
-  original script and avoids dangling-else hazards, e.g.
-  `if (a) { if (b) z(); }` stays as-is;
+- **is itself control flow** (`if` / `for` / `while` / `switch`) — this avoids
+  dangling-else hazards, e.g. `if (a) { if (b) z(); }` stays as-is;
 - **is a lexical declaration** (`let` / `const` / `class` / `function`) — these
   cannot legally be the sole body of a control-flow statement, so collapsing
   them would produce a parse error. (`var` is fine and is collapsed.);
 - **contains a comment** — so no documentation is silently dropped. Blocks like
   `if (a) { /* keep */ return 1; }` are preserved verbatim.
-
-These last two are improvements over the original regex-based script, which
-could emit invalid code (`if (a) const x = 1;`) and drop leading comments.
 
 ## Usage
 

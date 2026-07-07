@@ -1,5 +1,11 @@
 # biome-one-liner-plugin
 
+## 1.1.1
+
+### Patch Changes
+
+- Refresh README: remove internal predecessor references and reword for public accessibility.
+
 ## 1.1.0
 
 ### Minor Changes
