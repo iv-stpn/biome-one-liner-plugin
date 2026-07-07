@@ -16,6 +16,20 @@ function example(a: boolean, arr: number[]) {
   while (a) {
     doThing();
   }
+  do {
+    doThing();
+  } while (a);
+  switch (arr.length) {
+    case 0: {
+      return;
+    }
+    default: {
+      process(arr[0]);
+    }
+  }
+  outer: {
+    doThing();
+  }
 }
 const inc = (n: number) => {
   return n + 1;

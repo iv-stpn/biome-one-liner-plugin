@@ -10,23 +10,61 @@ language js
 //   else { stmt; }               ->  else stmt;
 //   for (...) { stmt; }          ->  for (...) stmt;
 //   while (cond) { stmt; }       ->  while (cond) stmt;
+//   do { stmt; } while (cond);   ->  do stmt; while (cond);
+//   switch: case x: { stmt; }    ->  case x: stmt;
+//   label: { stmt; }             ->  label: stmt;
 //   (x) => { return expr; }      ->  (x) => expr;
 //
 // A block is left untouched when its single statement:
-//   - is itself a control-flow statement (if / for / while / switch),
-//     matching the original script and avoiding dangling-else hazards;
+//   - is itself a control-flow statement (if / for / while / do-while /
+//     switch), matching the original script and avoiding dangling-else
+//     hazards;
 //   - is a lexical declaration (let / const / class / function), which
 //     cannot legally be the sole body of a control-flow statement; or
 //   - contains a comment, so no documentation is silently dropped.
+
+// A statement that is itself a control-flow construct. Such a statement is
+// left blocked, both because collapsing it risks a dangling-else and because
+// its own dedicated rule already collapses its inner single-statement body.
+pattern control_flow_statement() {
+    or {
+        JsIfStatement($_, $_),
+        JsForStatement($_, $_, $_, $_),
+        JsForInStatement($_, $_, $_),
+        JsForOfStatement($_, $_, $_),
+        JsWhileStatement($_, $_),
+        JsDoWhileStatement($_, $_),
+        JsSwitchStatement($_, $_)
+    }
+}
+
+// A lexical declaration (`let` / `const` / `class` / `function`). These cannot
+// legally be the sole body of a control-flow statement, and un-blocking one
+// inside a switch case would change its scope, so blocks holding one are kept.
+// (`var` is intentionally absent — it hoists and collapses safely.)
+pattern lexical_declaration() {
+    or {
+        r"let[^\w][\s\S]*",
+        r"const[^\w][\s\S]*",
+        r"class[^\w][\s\S]*",
+        r"function[^\w][\s\S]*"
+    }
+}
+
+// Any block or statement text carrying a line or block comment. Matching one
+// keeps the block intact so no documentation is silently dropped.
+pattern has_comment() {
+    or { r"[\s\S]*//[\s\S]*", r"[\s\S]*/\*[\s\S]*" }
+}
 
 or {
     // `if (cond) { stmt; }` and `if (cond) { stmt; } else ...`.
     // The else clause, when present, is preserved verbatim.
     JsIfStatement(test=$cond, consequent=$block, else_clause=$else) as $if where {
         $block <: JsBlockStatement(statements=[$s]),
-        not $block <: or { r"[\s\S]*//[\s\S]*", r"[\s\S]*/\*[\s\S]*" },
-        not $s <: or { r"let[^\w][\s\S]*", r"const[^\w][\s\S]*", r"class[^\w][\s\S]*", r"function[^\w][\s\S]*" },
-        not $s <: or { JsIfStatement($_, $_), JsForStatement($_, $_, $_, $_), JsForInStatement($_, $_, $_), JsForOfStatement($_, $_, $_), JsWhileStatement($_, $_), JsSwitchStatement($_, $_) },
+        not $block <: has_comment(),
+        not $s <: lexical_declaration(),
+        not $s <: control_flow_statement(),
         register_diagnostic(span=$if, message="Collapse this single-statement block into a one-liner.", severity="warn", fix_kind="safe"),
         $if => `if ($cond) $s $else`
     },
@@ -34,9 +72,9 @@ or {
     // `... else { stmt; }` — collapse the else branch's block.
     JsIfStatement(test=$cond, consequent=$cons, else_clause=JsElseClause(alternate=$block)) as $if2 where {
         $block <: JsBlockStatement(statements=[$s]),
-        not $block <: or { r"[\s\S]*//[\s\S]*", r"[\s\S]*/\*[\s\S]*" },
-        not $s <: or { r"let[^\w][\s\S]*", r"const[^\w][\s\S]*", r"class[^\w][\s\S]*", r"function[^\w][\s\S]*" },
-        not $s <: or { JsIfStatement($_, $_), JsForStatement($_, $_, $_, $_), JsForInStatement($_, $_, $_), JsForOfStatement($_, $_, $_), JsWhileStatement($_, $_), JsSwitchStatement($_, $_) },
+        not $block <: has_comment(),
+        not $s <: lexical_declaration(),
+        not $s <: control_flow_statement(),
         register_diagnostic(span=$if2, message="Collapse this single-statement block into a one-liner.", severity="warn", fix_kind="safe"),
         $if2 => `if ($cond) $cons else $s`
     },
@@ -44,9 +82,9 @@ or {
     // `for (init; test; update) { stmt; }`
     JsForStatement(initializer=$init, test=$test, update=$update, body=$block) as $for1 where {
         $block <: JsBlockStatement(statements=[$s]),
-        not $block <: or { r"[\s\S]*//[\s\S]*", r"[\s\S]*/\*[\s\S]*" },
-        not $s <: or { r"let[^\w][\s\S]*", r"const[^\w][\s\S]*", r"class[^\w][\s\S]*", r"function[^\w][\s\S]*" },
-        not $s <: or { JsIfStatement($_, $_), JsForStatement($_, $_, $_, $_), JsForInStatement($_, $_, $_), JsForOfStatement($_, $_, $_), JsWhileStatement($_, $_), JsSwitchStatement($_, $_) },
+        not $block <: has_comment(),
+        not $s <: lexical_declaration(),
+        not $s <: control_flow_statement(),
         register_diagnostic(span=$for1, message="Collapse this single-statement block into a one-liner.", severity="warn", fix_kind="safe"),
         $for1 => `for ($init; $test; $update) $s`
     },
@@ -54,9 +92,9 @@ or {
     // `for (init of iter) { stmt; }`
     JsForOfStatement(initializer=$init, expression=$expr, body=$block) as $for2 where {
         $block <: JsBlockStatement(statements=[$s]),
-        not $block <: or { r"[\s\S]*//[\s\S]*", r"[\s\S]*/\*[\s\S]*" },
-        not $s <: or { r"let[^\w][\s\S]*", r"const[^\w][\s\S]*", r"class[^\w][\s\S]*", r"function[^\w][\s\S]*" },
-        not $s <: or { JsIfStatement($_, $_), JsForStatement($_, $_, $_, $_), JsForInStatement($_, $_, $_), JsForOfStatement($_, $_, $_), JsWhileStatement($_, $_), JsSwitchStatement($_, $_) },
+        not $block <: has_comment(),
+        not $s <: lexical_declaration(),
+        not $s <: control_flow_statement(),
         register_diagnostic(span=$for2, message="Collapse this single-statement block into a one-liner.", severity="warn", fix_kind="safe"),
         $for2 => `for ($init of $expr) $s`
     },
@@ -64,9 +102,9 @@ or {
     // `for (init in obj) { stmt; }`
     JsForInStatement(initializer=$init, expression=$expr, body=$block) as $for3 where {
         $block <: JsBlockStatement(statements=[$s]),
-        not $block <: or { r"[\s\S]*//[\s\S]*", r"[\s\S]*/\*[\s\S]*" },
-        not $s <: or { r"let[^\w][\s\S]*", r"const[^\w][\s\S]*", r"class[^\w][\s\S]*", r"function[^\w][\s\S]*" },
-        not $s <: or { JsIfStatement($_, $_), JsForStatement($_, $_, $_, $_), JsForInStatement($_, $_, $_), JsForOfStatement($_, $_, $_), JsWhileStatement($_, $_), JsSwitchStatement($_, $_) },
+        not $block <: has_comment(),
+        not $s <: lexical_declaration(),
+        not $s <: control_flow_statement(),
         register_diagnostic(span=$for3, message="Collapse this single-statement block into a one-liner.", severity="warn", fix_kind="safe"),
         $for3 => `for ($init in $expr) $s`
     },
@@ -74,11 +112,60 @@ or {
     // `while (cond) { stmt; }`
     JsWhileStatement(test=$cond, body=$block) as $while1 where {
         $block <: JsBlockStatement(statements=[$s]),
-        not $block <: or { r"[\s\S]*//[\s\S]*", r"[\s\S]*/\*[\s\S]*" },
-        not $s <: or { r"let[^\w][\s\S]*", r"const[^\w][\s\S]*", r"class[^\w][\s\S]*", r"function[^\w][\s\S]*" },
-        not $s <: or { JsIfStatement($_, $_), JsForStatement($_, $_, $_, $_), JsForInStatement($_, $_, $_), JsForOfStatement($_, $_, $_), JsWhileStatement($_, $_), JsSwitchStatement($_, $_) },
+        not $block <: has_comment(),
+        not $s <: lexical_declaration(),
+        not $s <: control_flow_statement(),
         register_diagnostic(span=$while1, message="Collapse this single-statement block into a one-liner.", severity="warn", fix_kind="safe"),
         $while1 => `while ($cond) $s`
+    },
+
+    // `do { stmt; } while (cond);`  ->  `do stmt; while (cond);`
+    JsDoWhileStatement(body=$block, test=$cond) as $do where {
+        $block <: JsBlockStatement(statements=[$s]),
+        not $block <: has_comment(),
+        not $s <: lexical_declaration(),
+        not $s <: control_flow_statement(),
+        register_diagnostic(span=$do, message="Collapse this single-statement block into a one-liner.", severity="warn", fix_kind="safe"),
+        $do => `do $s while ($cond);`
+    },
+
+    // `case value: { stmt; }`  ->  `case value: stmt;`
+    // Only matches when the block is the entire case body (a single-element
+    // consequent), so fall-through cases like `case 1: { x(); } break;` — whose
+    // consequent has two statements — are left untouched. The lexical-declaration
+    // guard is essential here: a `case` block scopes `let`/`const`/`class` to that
+    // clause, and removing the braces would leak the binding across the whole
+    // switch (and collide with the same name in a sibling clause).
+    JsCaseClause(test=$test, consequent=[$block]) as $case where {
+        $block <: JsBlockStatement(statements=[$s]),
+        not $block <: has_comment(),
+        not $s <: lexical_declaration(),
+        not $s <: control_flow_statement(),
+        register_diagnostic(span=$case, message="Collapse this single-statement block into a one-liner.", severity="warn", fix_kind="safe"),
+        $case => `case $test: $s`
+    },
+
+    // `default: { stmt; }`  ->  `default: stmt;` — same guards as `case`.
+    JsDefaultClause(consequent=[$block]) as $default where {
+        $block <: JsBlockStatement(statements=[$s]),
+        not $block <: has_comment(),
+        not $s <: lexical_declaration(),
+        not $s <: control_flow_statement(),
+        register_diagnostic(span=$default, message="Collapse this single-statement block into a one-liner.", severity="warn", fix_kind="safe"),
+        $default => `default: $s`
+    },
+
+    // `label: { stmt; }`  ->  `label: stmt;`
+    // A labeled block whose sole statement is control flow (`label: { for (…) … }`)
+    // is left alone, so the common labeled-loop `break label` / `continue label`
+    // pattern is preserved: the label stays attached to the loop it targets.
+    JsLabeledStatement(label=$label, body=$block) as $labeled where {
+        $block <: JsBlockStatement(statements=[$s]),
+        not $block <: has_comment(),
+        not $s <: lexical_declaration(),
+        not $s <: control_flow_statement(),
+        register_diagnostic(span=$labeled, message="Collapse this single-statement block into a one-liner.", severity="warn", fix_kind="safe"),
+        $labeled => `$label: $s`
     },
 
     // `(params) => { return expr; }`  ->  `(params) => expr`.
@@ -96,7 +183,7 @@ or {
     JsArrowFunctionExpression(body=$block) where {
         $block <: JsFunctionBody(statements=[JsReturnStatement(argument=$ret)]) as $body,
         $ret <: r"[\s\S]+",
-        not $block <: or { r"[\s\S]*//[\s\S]*", r"[\s\S]*/\*[\s\S]*" },
+        not $block <: has_comment(),
         register_diagnostic(span=$body, message="Collapse this single-return arrow function body into a concise one-liner.", severity="warn", fix_kind="safe"),
         if ($ret <: or { JsObjectExpression(), JsSequenceExpression() }) {
             $body => `($ret)`
@@ -105,3 +192,4 @@ or {
         }
     }
 }
+

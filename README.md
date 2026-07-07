@@ -14,6 +14,14 @@ for (const x of arr) {
 while (cond) {
   doThing();
 }
+do {
+  doThing();
+} while (cond);
+switch (x) {
+  case 1: {
+    handle();
+  }
+}
 const inc = (n) => {
   return n + 1;
 };
@@ -23,6 +31,10 @@ if (cond) return value;
 if (a) foo(); else bar();
 for (const x of arr) process(x);
 while (cond) doThing();
+do doThing(); while (cond);
+switch (x) {
+  case 1: handle();
+}
 const inc = (n) => n + 1;
 ```
 
@@ -38,6 +50,10 @@ const inc = (n) => n + 1;
 | `for (init of iter) { stmt; }` | `for (init of iter) stmt;` |
 | `for (init in obj) { stmt; }` | `for (init in obj) stmt;` |
 | `while (c) { stmt; }` | `while (c) stmt;` |
+| `do { stmt; } while (c);` | `do stmt; while (c);` |
+| `switch: case v: { stmt; }` | `case v: stmt;` |
+| `switch: default: { stmt; }` | `default: stmt;` |
+| `label: { stmt; }` | `label: stmt;` |
 | `(x) => { return expr; }` | `(x) => expr` |
 
 Multi-statement blocks are left untouched.
@@ -46,13 +62,26 @@ Multi-statement blocks are left untouched.
 
 A single-statement block is **not** collapsed when its statement:
 
-- **is itself control flow** (`if` / `for` / `while` / `switch`) — this avoids
-  dangling-else hazards, e.g. `if (a) { if (b) z(); }` stays as-is;
+- **is itself control flow** (`if` / `for` / `while` / `do…while` / `switch`) —
+  this avoids dangling-else hazards, e.g. `if (a) { if (b) z(); }` stays as-is;
 - **is a lexical declaration** (`let` / `const` / `class` / `function`) — these
   cannot legally be the sole body of a control-flow statement, so collapsing
   them would produce a parse error. (`var` is fine and is collapsed.);
 - **contains a comment** — so no documentation is silently dropped. Blocks like
   `if (a) { /* keep */ return 1; }` are preserved verbatim.
+
+The `switch` case/default collapse (`case v: { stmt; }` → `case v: stmt;`) only
+fires when the block is the **entire** case body, so a fall-through case such as
+`case 1: { x(); } break;` (two statements in the clause) is left alone. The
+lexical-declaration guard matters most here: a `case` block scopes its
+`let`/`const`/`class` to that clause, so un-blocking one would leak the binding
+across the whole switch (and could collide with the same name in a sibling
+clause) — those cases are kept braced.
+
+The labeled-block collapse (`label: { stmt; }` → `label: stmt;`) is skipped when
+the sole statement is control flow, so the common labeled-loop pattern
+`outer: for (…) { … break outer; }` is preserved with its label attached to the
+loop it targets.
 
 The arrow-body collapse (`(x) => { return expr; }` → `(x) => expr`) rewrites only
 the block body, so the arrow's parameters, type parameters, and return-type
@@ -125,12 +154,15 @@ npm test
 ```
 
 Covered cases include every collapsed construct (`if` / `else if` / `else` /
-`for` / `for-of` / `for-in` / `while`, including `for (;;)`, plus the arrow-body
-collapse with object/sequence wrapping), and the non-collapsing cases:
-multi-statement blocks, blocks whose body is itself control flow,
-`let`/`const`/`class`/`function` bodies (vs. `var`, which collapses), blocks
-containing comments, `function` declaration bodies (which are never touched),
-and arrow bodies that can't collapse (empty `return;`, comments,
+`for` / `for-of` / `for-in` / `while` / `do-while` / `switch` case & default /
+labeled block, including `for (;;)`, plus the arrow-body collapse with
+object/sequence wrapping), and the non-collapsing cases: multi-statement blocks,
+blocks whose body is itself control flow, `let`/`const`/`class`/`function`
+bodies (vs. `var`, which collapses), blocks containing comments, `function`
+declaration bodies (which are never touched), fall-through `switch` cases and
+`case`/`default` blocks holding a lexical declaration (which would leak scope
+across the switch), labeled loops (whose `break`/`continue` target is
+preserved), and arrow bodies that can't collapse (empty `return;`, comments,
 multi-statement).
 
 ## Releasing
@@ -152,11 +184,15 @@ suite on every push and pull request ([.github/workflows/ci.yml](.github/workflo
 ## How it works
 
 The plugin is one Biome plugin file. It matches `if` / `for` / `for-of` /
-`for-in` / `while` statements whose body is a `JsBlockStatement` with exactly
-one statement (`statements=[$s]`), guarded by the three rules above, and
-rewrites the block away via the GritQL `=>` operator. `if`/`else` branches are
-collapsed independently, so `if (a) { x; } else { y; }` reaches
-`if (a) x; else y;` over two fix passes.
+`for-in` / `while` / `do-while` statements, `switch` `case`/`default` clauses,
+and labeled statements whose body is a `JsBlockStatement` with exactly one
+statement (`statements=[$s]`), guarded by the three shared patterns
+(`control_flow_statement`, `lexical_declaration`, `has_comment`) defined at the
+top of the file, and rewrites the block away via the GritQL `=>` operator.
+`if`/`else` branches are collapsed independently, so `if (a) { x; } else { y; }`
+reaches `if (a) x; else y;` over two fix passes. `switch` clauses only collapse
+when the block is the entire clause body (a single-element consequent), so
+fall-through cases are left intact.
 
 The arrow rule matches a `JsArrowFunctionExpression` whose body is a
 `JsFunctionBody` holding a single `JsReturnStatement`, and rewrites only that
