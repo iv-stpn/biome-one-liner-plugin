@@ -46,6 +46,7 @@ const inc = (n) => n + 1;
 | `if (c) { stmt; } else …` | `if (c) stmt; else …` (else preserved) |
 | `… else { stmt; }` | `… else stmt;` |
 | `else if (c) { stmt; }` | `else if (c) stmt;` |
+| `else { if (c) … }` | `else if (c) …` (unwrap to else-if) |
 | `for (init; test; update) { stmt; }` | `for (init; test; update) stmt;` |
 | `for (init of iter) { stmt; }` | `for (init of iter) stmt;` |
 | `for (init in obj) { stmt; }` | `for (init in obj) stmt;` |
@@ -63,7 +64,10 @@ Multi-statement blocks are left untouched.
 A single-statement block is **not** collapsed when its statement:
 
 - **is itself control flow** (`if` / `for` / `while` / `do…while` / `switch`) —
-  this avoids dangling-else hazards, e.g. `if (a) { if (b) z(); }` stays as-is;
+  this avoids dangling-else hazards, e.g. `if (a) { if (b) z(); }` stays as-is.
+  The sole exception is an `else` whose only statement is an `if`, which is
+  safely unwrapped to `else if` (nothing follows an `else`, so there is no
+  dangling-else risk);
 - **is a lexical declaration** (`let` / `const` / `class` / `function`) — these
   cannot legally be the sole body of a control-flow statement, so collapsing
   them would produce a parse error. (`var` is fine and is collapsed.);
@@ -82,6 +86,11 @@ The labeled-block collapse (`label: { stmt; }` → `label: stmt;`) is skipped wh
 the sole statement is control flow, so the common labeled-loop pattern
 `outer: for (…) { … break outer; }` is preserved with its label attached to the
 loop it targets.
+
+A `for await (…) { stmt; }` loop is deliberately **not** collapsed. It parses as
+an ordinary `for…of` node whose `await` is a bare token rather than a captured
+field, so the rewrite cannot re-emit it — collapsing would silently drop the
+`await` and turn async iteration into sync iteration. The braced form is kept.
 
 The arrow-body collapse (`(x) => { return expr; }` → `(x) => expr`) rewrites only
 the block body, so the arrow's parameters, type parameters, and return-type
@@ -155,14 +164,15 @@ npm test
 
 Covered cases include every collapsed construct (`if` / `else if` / `else` /
 `for` / `for-of` / `for-in` / `while` / `do-while` / `switch` case & default /
-labeled block, including `for (;;)`, plus the arrow-body collapse with
-object/sequence wrapping), and the non-collapsing cases: multi-statement blocks,
-blocks whose body is itself control flow, `let`/`const`/`class`/`function`
-bodies (vs. `var`, which collapses), blocks containing comments, `function`
-declaration bodies (which are never touched), fall-through `switch` cases and
-`case`/`default` blocks holding a lexical declaration (which would leak scope
-across the switch), labeled loops (whose `break`/`continue` target is
-preserved), and arrow bodies that can't collapse (empty `return;`, comments,
+labeled block / `else { if … }` → `else if …`, including `for (;;)`, plus the
+arrow-body collapse with object/sequence wrapping), and the non-collapsing cases:
+multi-statement blocks, blocks whose body is itself control flow,
+`let`/`const`/`class`/`function` bodies (vs. `var`, which collapses), blocks
+containing comments, `function` declaration bodies (which are never touched),
+fall-through `switch` cases and `case`/`default` blocks holding a lexical
+declaration (which would leak scope across the switch), labeled loops (whose
+`break`/`continue` target is preserved), `for await` loops (whose `await` cannot
+be re-emitted), and arrow bodies that can't collapse (empty `return;`, comments,
 multi-statement).
 
 ## Releasing
@@ -190,9 +200,14 @@ statement (`statements=[$s]`), guarded by the three shared patterns
 (`control_flow_statement`, `lexical_declaration`, `has_comment`) defined at the
 top of the file, and rewrites the block away via the GritQL `=>` operator.
 `if`/`else` branches are collapsed independently, so `if (a) { x; } else { y; }`
-reaches `if (a) x; else y;` over two fix passes. `switch` clauses only collapse
-when the block is the entire clause body (a single-element consequent), so
-fall-through cases are left intact.
+reaches `if (a) x; else y;` over two fix passes. A separate rule unwraps an
+else-block whose sole statement is an `if` (`else { if (a) … }` → `else if (a) …`);
+it is the mirror image of the else-collapse rule, matching exactly the
+control-flow case the others skip. `switch` clauses only collapse when the block
+is the entire clause body (a single-element consequent), so fall-through cases
+are left intact. `for await (…)` loops are matched but guarded out by a text
+check, since the `await` token is not a captured field and would be dropped by
+the rewrite.
 
 The arrow rule matches a `JsArrowFunctionExpression` whose body is a
 `JsFunctionBody` holding a single `JsReturnStatement`, and rewrites only that

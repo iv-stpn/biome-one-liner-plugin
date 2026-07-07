@@ -30,6 +30,18 @@ function example(a: boolean, arr: number[]) {
   outer: {
     doThing();
   }
+  // `else { if … }` unwraps to `else if …`
+  if (a) {
+    foo();
+  } else {
+    if (arr.length) bar();
+  }
+}
+// `for await` is left alone — collapsing would drop the `await`
+async function drain(stream: AsyncIterable<number>) {
+  for await (const x of stream) {
+    process(x);
+  }
 }
 const inc = (n: number) => {
   return n + 1;

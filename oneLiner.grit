@@ -79,6 +79,21 @@ or {
         $if2 => `if ($cond) $cons else $s`
     },
 
+    // `... else { if (cond) … } ` -> `... else if (cond) …`.
+    // Unwrap an else-block whose sole statement is itself an `if`. This is the
+    // complement of the else-collapse rule above (which leaves control-flow
+    // bodies alone): here the control-flow body is exactly what we want to lift
+    // into an `else if`. It is safe because nothing follows an `else`, so there
+    // is no dangling-else hazard. The `if` is matched last-of-else so its own
+    // consequent/alternate (and any further `else if` chain) ride along verbatim.
+    JsIfStatement(test=$cond, consequent=$cons, else_clause=JsElseClause(alternate=$block)) as $elif where {
+        $block <: JsBlockStatement(statements=[$s]),
+        $s <: JsIfStatement($_, $_),
+        not $block <: has_comment(),
+        register_diagnostic(span=$elif, message="Unwrap this else-block into an else-if.", severity="warn", fix_kind="safe"),
+        $elif => `if ($cond) $cons else $s`
+    },
+
     // `for (init; test; update) { stmt; }`
     JsForStatement(initializer=$init, test=$test, update=$update, body=$block) as $for1 where {
         $block <: JsBlockStatement(statements=[$s]),
@@ -90,8 +105,13 @@ or {
     },
 
     // `for (init of iter) { stmt; }`
+    // A `for await (…)` loop is left alone: it parses as a JsForOfStatement whose
+    // `await` is a bare token (not a captured field), so the rewrite template
+    // cannot re-emit it — collapsing would silently drop the `await` and turn
+    // async iteration into sync iteration.
     JsForOfStatement(initializer=$init, expression=$expr, body=$block) as $for2 where {
         $block <: JsBlockStatement(statements=[$s]),
+        not $for2 <: r"for\s+await[\s\S]*",
         not $block <: has_comment(),
         not $s <: lexical_declaration(),
         not $s <: control_flow_statement(),
