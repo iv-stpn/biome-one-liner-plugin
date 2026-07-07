@@ -17,3 +17,9 @@ function example(a: boolean, arr: number[]) {
     doThing();
   }
 }
+const inc = (n: number) => {
+  return n + 1;
+};
+const makePoint = (x: number, y: number) => {
+  return { x, y };
+};

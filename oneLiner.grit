@@ -10,6 +10,7 @@ language js
 //   else { stmt; }               ->  else stmt;
 //   for (...) { stmt; }          ->  for (...) stmt;
 //   while (cond) { stmt; }       ->  while (cond) stmt;
+//   (x) => { return expr; }      ->  (x) => expr;
 //
 // A block is left untouched when its single statement:
 //   - is itself a control-flow statement (if / for / while / switch),
@@ -78,5 +79,29 @@ or {
         not $s <: or { JsIfStatement($_, $_), JsForStatement($_, $_, $_, $_), JsForInStatement($_, $_, $_), JsForOfStatement($_, $_, $_), JsWhileStatement($_, $_), JsSwitchStatement($_, $_) },
         register_diagnostic(span=$while1, message="Collapse this single-statement block into a one-liner.", severity="warn", fix_kind="safe"),
         $while1 => `while ($cond) $s`
+    },
+
+    // `(params) => { return expr; }`  ->  `(params) => expr`.
+    // Only the block body is rewritten, so the arrow's parameters, type
+    // parameters and return-type annotation are preserved untouched. This is
+    // semantics-preserving: an arrow already captures `this`/`arguments`
+    // lexically in either body form.
+    //
+    // Left untouched when the body:
+    //   - has no return argument (`return;`), which cannot become a concise
+    //     body without a parse error;
+    //   - contains a comment, so no documentation is silently dropped.
+    // An object-literal or sequence-expression return is wrapped in parens so
+    // it is not re-parsed as a block or a comma expression.
+    JsArrowFunctionExpression(body=$block) where {
+        $block <: JsFunctionBody(statements=[JsReturnStatement(argument=$ret)]) as $body,
+        $ret <: r"[\s\S]+",
+        not $block <: or { r"[\s\S]*//[\s\S]*", r"[\s\S]*/\*[\s\S]*" },
+        register_diagnostic(span=$body, message="Collapse this single-return arrow function body into a concise one-liner.", severity="warn", fix_kind="safe"),
+        if ($ret <: or { JsObjectExpression(), JsSequenceExpression() }) {
+            $body => `($ret)`
+        } else {
+            $body => `$ret`
+        }
     }
 }

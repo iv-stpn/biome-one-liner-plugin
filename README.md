@@ -14,12 +14,16 @@ for (const x of arr) {
 while (cond) {
   doThing();
 }
+const inc = (n) => {
+  return n + 1;
+};
 
 // after
 if (cond) return value;
 if (a) foo(); else bar();
 for (const x of arr) process(x);
 while (cond) doThing();
+const inc = (n) => n + 1;
 ```
 
 ## What it collapses
@@ -34,6 +38,7 @@ while (cond) doThing();
 | `for (init of iter) { stmt; }` | `for (init of iter) stmt;` |
 | `for (init in obj) { stmt; }` | `for (init in obj) stmt;` |
 | `while (c) { stmt; }` | `while (c) stmt;` |
+| `(x) => { return expr; }` | `(x) => expr` |
 
 Multi-statement blocks are left untouched.
 
@@ -48,6 +53,22 @@ A single-statement block is **not** collapsed when its statement:
   them would produce a parse error. (`var` is fine and is collapsed.);
 - **contains a comment** — so no documentation is silently dropped. Blocks like
   `if (a) { /* keep */ return 1; }` are preserved verbatim.
+
+The arrow-body collapse (`(x) => { return expr; }` → `(x) => expr`) rewrites only
+the block body, so the arrow's parameters, type parameters, and return-type
+annotation are preserved verbatim, and it is semantics-preserving (an arrow
+captures `this`/`arguments` lexically in either body form). It is skipped when
+the body:
+
+- **has no return argument** (`return;`) — a concise body cannot express that;
+- **contains a comment** — same rule as above.
+
+An object-literal or sequence-expression return is wrapped in parentheses
+(`() => ({ x: 1 })`, `() => (a, b)`) so it is not re-parsed as a block or a
+comma expression. Only arrow functions are rewritten — `function` declarations
+and expressions are left alone, since converting them would change hoisting and
+`this`/`arguments` semantics and can drop `async`/generator/return-type
+information.
 
 ## Usage
 
@@ -104,11 +125,13 @@ npm test
 ```
 
 Covered cases include every collapsed construct (`if` / `else if` / `else` /
-`for` / `for-of` / `for-in` / `while`, including `for (;;)`), plus the
-non-collapsing cases: multi-statement blocks, blocks whose body is itself
-control flow, `let`/`const`/`class`/`function` bodies (vs. `var`, which
-collapses), blocks containing comments, and function/arrow bodies (which are
-never touched).
+`for` / `for-of` / `for-in` / `while`, including `for (;;)`, plus the arrow-body
+collapse with object/sequence wrapping), and the non-collapsing cases:
+multi-statement blocks, blocks whose body is itself control flow,
+`let`/`const`/`class`/`function` bodies (vs. `var`, which collapses), blocks
+containing comments, `function` declaration bodies (which are never touched),
+and arrow bodies that can't collapse (empty `return;`, comments,
+multi-statement).
 
 ## Releasing
 
@@ -134,3 +157,10 @@ one statement (`statements=[$s]`), guarded by the three rules above, and
 rewrites the block away via the GritQL `=>` operator. `if`/`else` branches are
 collapsed independently, so `if (a) { x; } else { y; }` reaches
 `if (a) x; else y;` over two fix passes.
+
+The arrow rule matches a `JsArrowFunctionExpression` whose body is a
+`JsFunctionBody` holding a single `JsReturnStatement`, and rewrites only that
+body node — so the arrow's parameters, type parameters and return-type
+annotation are preserved verbatim. An object-literal or sequence-expression
+return is wrapped in parens (`() => ({ x: 1 })`) so the concise body isn't
+re-parsed as a block or a comma expression.
