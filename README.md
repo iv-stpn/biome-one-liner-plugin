@@ -1,13 +1,17 @@
 # biome-one-liner-plugin
 
-A [Biome](https://biomejs.dev) plugin (written in [GritQL](https://biomejs.dev/blog/gritql-biome)) that collapses single-statement blocks into one-liners — turning the verbose form on the left into the tidy form on the right.
+A [Biome](https://biomejs.dev) plugin (written in
+[GritQL](https://biomejs.dev/blog/gritql-biome)) that collapses single-statement
+blocks into one-liners — turning the verbose form on the left into the tidy form
+on the right.
 
 ```ts
 // before
 if (cond) {
   return value;
 }
-if (a) { foo(); } else { bar(); }
+if (a) foo();
+else bar();
 for (const x of arr) {
   process(x);
 }
@@ -34,29 +38,30 @@ for (const x of arr) process(x);
 while (cond) doThing();
 do doThing(); while (cond);
 switch (x) {
-  case 1: handle();
+  case 1:
+    handle();
 }
 const inc = (n) => n + 1;
 ```
 
 ## What it collapses
 
-| Construct | Transformation |
-| --- | --- |
-| `if (c) { stmt; }` | `if (c) stmt;` |
-| `if (c) { stmt; } else …` | `if (c) stmt;` + `else …` on its own line |
-| `… else { stmt; }` | `else stmt;` on its own line |
-| `else if (c) { stmt; }` | `else if (c) stmt;` on its own line |
-| `else { if (c) … }` | `else if (c) …` on its own line (unwrap to else-if) |
-| `for (init; test; update) { stmt; }` | `for (init; test; update) stmt;` |
-| `for (init of iter) { stmt; }` | `for (init of iter) stmt;` |
-| `for (init in obj) { stmt; }` | `for (init in obj) stmt;` |
-| `while (c) { stmt; }` | `while (c) stmt;` |
-| `do { stmt; } while (c);` | `do stmt; while (c);` |
-| `switch: case v: { stmt; }` | `case v: stmt;` |
-| `switch: default: { stmt; }` | `default: stmt;` |
-| `label: { stmt; }` | `label: stmt;` |
-| `(x) => { return expr; }` | `(x) => expr` |
+| Construct                            | Transformation                                      |
+| ------------------------------------ | --------------------------------------------------- |
+| `if (c) { stmt; }`                   | `if (c) stmt;`                                      |
+| `if (c) { stmt; } else …`            | `if (c) stmt;` + `else …` on its own line           |
+| `… else { stmt; }`                   | `else stmt;` on its own line                        |
+| `else if (c) { stmt; }`              | `else if (c) stmt;` on its own line                 |
+| `else { if (c) … }`                  | `else if (c) …` on its own line (unwrap to else-if) |
+| `for (init; test; update) { stmt; }` | `for (init; test; update) stmt;`                    |
+| `for (init of iter) { stmt; }`       | `for (init of iter) stmt;`                          |
+| `for (init in obj) { stmt; }`        | `for (init in obj) stmt;`                           |
+| `while (c) { stmt; }`                | `while (c) stmt;`                                   |
+| `do { stmt; } while (c);`            | `do stmt; while (c);`                               |
+| `switch: case v: { stmt; }`          | `case v: stmt;`                                     |
+| `switch: default: { stmt; }`         | `default: stmt;`                                    |
+| `label: { stmt; }`                   | `label: stmt;`                                      |
+| `(x) => { return expr; }`            | `(x) => expr`                                       |
 
 Multi-statement blocks are left untouched.
 
@@ -93,8 +98,8 @@ an ordinary `for…of` node whose `await` is a bare token rather than a captured
 field, so the rewrite cannot re-emit it — collapsing would silently drop the
 `await` and turn async iteration into sync iteration. The braced form is kept.
 
-The arrow-body collapse (`(x) => { return expr; }` → `(x) => expr`) rewrites only
-the block body, so the arrow's parameters, type parameters, and return-type
+The arrow-body collapse (`(x) => { return expr; }` → `(x) => expr`) rewrites
+only the block body, so the arrow's parameters, type parameters, and return-type
 annotation are preserved verbatim, and it is semantics-preserving (an arrow
 captures `this`/`arguments` lexically in either body form). It is skipped when
 the body:
@@ -136,8 +141,8 @@ npx @biomejs/biome lint --write <files>
 npx @biomejs/biome check --write <files>
 ```
 
-Without `--write`, the plugin only reports diagnostics (severity `warn`,
-code `plugin`), so you can review before applying.
+Without `--write`, the plugin only reports diagnostics (severity `warn`, code
+`plugin`), so you can review before applying.
 
 Requires Biome **2.5+** (GritQL plugins with code-fixes landed in v2.5).
 
@@ -155,7 +160,7 @@ npx @biomejs/biome lint --write example.ts
 
 Snapshot tests live in [tests/](tests/). Each case is a pair:
 `tests/fixtures/<name>.input.ts` (before) and `<name>.expected.ts` (after). The
-runner ([tests/run.mjs](tests/run.mjs)) runs `biome check --write` on each input
+runner ([tests/run.mjs](tests/run.mjs)) runs `biome lint --write` on each input
 with only the plugin enabled (no other lint rules) and compares against the
 expected output.
 
@@ -166,8 +171,8 @@ npm test
 Covered cases include every collapsed construct (`if` / `else if` / `else` /
 `for` / `for-of` / `for-in` / `while` / `do-while` / `switch` case & default /
 labeled block / `else { if … }` → `else if …`, including `for (;;)`, plus the
-arrow-body collapse with object/sequence wrapping), and the non-collapsing cases:
-multi-statement blocks, blocks whose body is itself control flow,
+arrow-body collapse with object/sequence wrapping), and the non-collapsing
+cases: multi-statement blocks, blocks whose body is itself control flow,
 `let`/`const`/`class`/`function` bodies (vs. `var`, which collapses), blocks
 containing comments, `function` declaration bodies (which are never touched),
 fall-through `switch` cases and `case`/`default` blocks holding a lexical
@@ -178,7 +183,8 @@ multi-statement).
 
 ## Releasing
 
-Versions and the changelog are managed with [Changesets](https://github.com/changesets/changesets).
+Versions and the changelog are managed with
+[Changesets](https://github.com/changesets/changesets).
 
 1. Add a changeset describing a change: `npx changeset`.
 2. Commit the changeset to your branch.
@@ -190,7 +196,8 @@ Versions and the changelog are managed with [Changesets](https://github.com/chan
 The workflow needs an `NPM_TOKEN` secret in the repo (an npm
 [automation access token](https://docs.npmjs.com/creating-and-viewing-access-tokens)).
 Add it under **Settings → Secrets and variables → Actions**. CI runs the test
-suite on every push and pull request ([.github/workflows/ci.yml](.github/workflows/ci.yml)).
+suite on every push and pull request
+([.github/workflows/ci.yml](.github/workflows/ci.yml)).
 
 ## How it works
 
@@ -203,14 +210,13 @@ top of the file, and rewrites the block away via the GritQL `=>` operator.
 `if`/`else` branches are collapsed independently, so `if (a) { x; } else { y; }`
 reaches `if (a) x;` / `else y;` over two fix passes, with the `else` emitted on
 its own line so each branch reads on a separate line (the fix itself inserts the
-line break, independent of the formatter). A separate rule unwraps an
-else-block whose sole statement is an `if` (`else { if (a) … }` → `else if (a) …`);
-it is the mirror image of the else-collapse rule, matching exactly the
-control-flow case the others skip. `switch` clauses only collapse when the block
-is the entire clause body (a single-element consequent), so fall-through cases
-are left intact. `for await (…)` loops are matched but guarded out by a text
-check, since the `await` token is not a captured field and would be dropped by
-the rewrite.
+line break, independent of the formatter). A separate rule unwraps an else-block
+whose sole statement is an `if` (`else { if (a) … }` → `else if (a) …`); it is
+the mirror image of the else-collapse rule, matching exactly the control-flow
+case the others skip. `switch` clauses only collapse when the block is the
+entire clause body (a single-element consequent), so fall-through cases are left
+intact. `for await (…)` loops are matched but guarded out by a text check, since
+the `await` token is not a captured field and would be dropped by the rewrite.
 
 The arrow rule matches a `JsArrowFunctionExpression` whose body is a
 `JsFunctionBody` holding a single `JsReturnStatement`, and rewrites only that

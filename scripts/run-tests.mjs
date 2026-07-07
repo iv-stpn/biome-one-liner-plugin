@@ -2,19 +2,27 @@
 //
 // For every fixture in tests/fixtures/<name>.input.ts, copies the input into a
 // temporary file (so the test-only biome.json applies), runs
-// `biome check --write` with only the plugin enabled, and compares the result
+// `biome lint --write` with only the plugin enabled, and compares the result
 // to tests/fixtures/<name>.expected.ts.
 //
-// Run with: node tests/run.mjs
+// Run with: node scripts/run-tests.mjs
 import { execFileSync } from "node:child_process";
-import { mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+	mkdirSync,
+	readdirSync,
+	readFileSync,
+	rmSync,
+	writeFileSync,
+} from "node:fs";
 import { dirname, join } from "node:path";
+import process from "node:process";
 import { fileURLToPath } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(__dirname, "..");
-const FIXTURES = join(__dirname, "fixtures");
-const TMP = join(__dirname, ".tmp");
+const TESTS = join(ROOT, "tests");
+const FIXTURES = join(TESTS, "fixtures");
+const TMP = join(TESTS, ".tmp");
 const BIOME = join(ROOT, "node_modules", ".bin", "biome");
 
 const failures = [];
@@ -36,11 +44,11 @@ for (const name of cases) {
 	writeFileSync(tmpFile, input, "utf8");
 
 	try {
-		// `check --write` applies lint fixes (the plugin's safe fixes) and formats.
+		// `lint --write` applies lint fixes (the plugin's safe fixes) and formats.
 		// Ignore the exit code: biome returns non-zero when any diagnostic was
 		// emitted, even one that was fixed. We only care about the file content.
-		execFileSync(BIOME, ["check", "--write", tmpFile], {
-			cwd: __dirname,
+		execFileSync(BIOME, ["lint", "--write", tmpFile], {
+			cwd: TESTS,
 			stdio: "pipe",
 		});
 	} catch {
@@ -48,9 +56,8 @@ for (const name of cases) {
 	}
 
 	const actual = readFileSync(tmpFile, "utf8");
-	if (actual === expected) {
-		console.log(`  ✓ ${name}`);
-	} else {
+	if (actual === expected) console.log(`  ✓ ${name}`);
+	else {
 		failures.push(name);
 		console.log(`  ✗ ${name}`);
 		console.log("    --- expected ---");
@@ -62,5 +69,7 @@ for (const name of cases) {
 
 rmSync(TMP, { recursive: true, force: true });
 
-console.log(`\n${failures.length === 0 ? "all passing" : `${failures.length} failing`}: ${count - failures.length}/${count} cases`);
+console.log(
+	`\n${failures.length === 0 ? "all passing" : `${failures.length} failing`}: ${count - failures.length}/${count} cases`,
+);
 process.exit(failures.length === 0 ? 0 : 1);
