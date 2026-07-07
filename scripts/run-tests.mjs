@@ -44,10 +44,10 @@ for (const name of cases) {
 	writeFileSync(tmpFile, input, "utf8");
 
 	try {
-		// `lint --write` applies lint fixes (the plugin's safe fixes) and formats.
+		// `check --write` applies lint fixes (the plugin's safe fixes) and formats.
 		// Ignore the exit code: biome returns non-zero when any diagnostic was
 		// emitted, even one that was fixed. We only care about the file content.
-		execFileSync(BIOME, ["lint", "--write", tmpFile], {
+		execFileSync(BIOME, ["check", "--write", tmpFile], {
 			cwd: TESTS,
 			stdio: "pipe",
 		});

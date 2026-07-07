@@ -22,22 +22,27 @@ jobs:
           # fetch full history so changesets can read prior tags/commits
           fetch-depth: 0
 
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      # Configure .npmrc with the npm auth token so `changeset publish` can
+      # publish to the registry. No node-version is set, so the runner's
+      # default Node is used (avoids the Node 20 deprecation warning).
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
-          cache: npm
           registry-url: https://registry.npmjs.org
 
-      - run: npm ci
+      - run: bun install --frozen-lockfile
 
       - name: Create Release Pull Request or Publish
         id: changesets
         uses: changesets/action@v1
         with:
-          # `npm run release` runs `changeset publish`, which publishes to npm
+          # `bun run release` runs `changeset publish`, which publishes to npm
           # when there are pending changesets that have been versioned.
-          publish: npm run release
-          version: npm run version
+          publish: bun run release
+          version: bun run version
           commit: "chore(release): version package"
           title: "chore(release): version package"
         env:
