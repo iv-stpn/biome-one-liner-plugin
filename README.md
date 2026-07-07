@@ -28,7 +28,8 @@ const inc = (n) => {
 
 // after
 if (cond) return value;
-if (a) foo(); else bar();
+if (a) foo();
+else bar();
 for (const x of arr) process(x);
 while (cond) doThing();
 do doThing(); while (cond);
@@ -43,10 +44,10 @@ const inc = (n) => n + 1;
 | Construct | Transformation |
 | --- | --- |
 | `if (c) { stmt; }` | `if (c) stmt;` |
-| `if (c) { stmt; } else …` | `if (c) stmt; else …` (else preserved) |
-| `… else { stmt; }` | `… else stmt;` |
-| `else if (c) { stmt; }` | `else if (c) stmt;` |
-| `else { if (c) … }` | `else if (c) …` (unwrap to else-if) |
+| `if (c) { stmt; } else …` | `if (c) stmt;` + `else …` on its own line |
+| `… else { stmt; }` | `else stmt;` on its own line |
+| `else if (c) { stmt; }` | `else if (c) stmt;` on its own line |
+| `else { if (c) … }` | `else if (c) …` on its own line (unwrap to else-if) |
 | `for (init; test; update) { stmt; }` | `for (init; test; update) stmt;` |
 | `for (init of iter) { stmt; }` | `for (init of iter) stmt;` |
 | `for (init in obj) { stmt; }` | `for (init in obj) stmt;` |
@@ -200,7 +201,9 @@ statement (`statements=[$s]`), guarded by the three shared patterns
 (`control_flow_statement`, `lexical_declaration`, `has_comment`) defined at the
 top of the file, and rewrites the block away via the GritQL `=>` operator.
 `if`/`else` branches are collapsed independently, so `if (a) { x; } else { y; }`
-reaches `if (a) x; else y;` over two fix passes. A separate rule unwraps an
+reaches `if (a) x;` / `else y;` over two fix passes, with the `else` emitted on
+its own line so each branch reads on a separate line (the fix itself inserts the
+line break, independent of the formatter). A separate rule unwraps an
 else-block whose sole statement is an `if` (`else { if (a) … }` → `else if (a) …`);
 it is the mirror image of the else-collapse rule, matching exactly the
 control-flow case the others skip. `switch` clauses only collapse when the block

@@ -6,8 +6,8 @@ language js
 // Mirrors scripts/refactor-one-liners.ts:
 //   if (cond) { return x; }      ->  if (cond) return x;
 //   if (cond) { stmt; }          ->  if (cond) stmt;
-//   else if (cond) { stmt; }     ->  else if (cond) stmt;
-//   else { stmt; }               ->  else stmt;
+//   else if (cond) { stmt; }     ->  else if (cond) stmt;   (on its own line)
+//   else { stmt; }               ->  else stmt;             (on its own line)
 //   for (...) { stmt; }          ->  for (...) stmt;
 //   while (cond) { stmt; }       ->  while (cond) stmt;
 //   do { stmt; } while (cond);   ->  do stmt; while (cond);
@@ -59,24 +59,32 @@ pattern has_comment() {
 
 or {
     // `if (cond) { stmt; }` and `if (cond) { stmt; } else ...`.
-    // The else clause, when present, is preserved verbatim.
+    // The else clause, when present, is preserved verbatim on its own line —
+    // `if`/`else` stay on separate lines so the branches read independently.
     JsIfStatement(test=$cond, consequent=$block, else_clause=$else) as $if where {
         $block <: JsBlockStatement(statements=[$s]),
         not $block <: has_comment(),
         not $s <: lexical_declaration(),
         not $s <: control_flow_statement(),
         register_diagnostic(span=$if, message="Collapse this single-statement block into a one-liner.", severity="warn", fix_kind="safe"),
-        $if => `if ($cond) $s $else`
+        if ($else <: JsElseClause()) {
+            $if => `if ($cond) $s
+$else`
+        } else {
+            $if => `if ($cond) $s`
+        }
     },
 
-    // `... else { stmt; }` — collapse the else branch's block.
+    // `... else { stmt; }` — collapse the else branch's block. The `else` is
+    // emitted on its own line so it never shares a line with the `if` branch.
     JsIfStatement(test=$cond, consequent=$cons, else_clause=JsElseClause(alternate=$block)) as $if2 where {
         $block <: JsBlockStatement(statements=[$s]),
         not $block <: has_comment(),
         not $s <: lexical_declaration(),
         not $s <: control_flow_statement(),
         register_diagnostic(span=$if2, message="Collapse this single-statement block into a one-liner.", severity="warn", fix_kind="safe"),
-        $if2 => `if ($cond) $cons else $s`
+        $if2 => `if ($cond) $cons
+else $s`
     },
 
     // `... else { if (cond) … } ` -> `... else if (cond) …`.
@@ -91,7 +99,8 @@ or {
         $s <: JsIfStatement($_, $_),
         not $block <: has_comment(),
         register_diagnostic(span=$elif, message="Unwrap this else-block into an else-if.", severity="warn", fix_kind="safe"),
-        $elif => `if ($cond) $cons else $s`
+        $elif => `if ($cond) $cons
+else $s`
     },
 
     // `for (init; test; update) { stmt; }`
