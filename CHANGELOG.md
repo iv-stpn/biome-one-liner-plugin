@@ -1,5 +1,14 @@
 # biome-one-liner-plugin
 
+## 1.3.1
+
+### Patch Changes
+
+- d88494d: Emit `else` / `else if` branches on their own line instead of sharing the line
+  with the `if` branch. `if (a) { foo(); } else { bar(); }` now fixes to
+  `if (a) foo();` / `else bar();` directly (the fix inserts the line break, so it
+  holds even under lint-only `--write` without the formatter).
+
 ## 1.3.0
 
 ### Minor Changes
