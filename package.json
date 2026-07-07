@@ -27,6 +27,7 @@
   ],
   "scripts": {
     "test": "node tests/run.mjs",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p tests/tsconfig.json",
     "version": "changeset version",
     "release": "changeset publish"
   },
@@ -36,6 +37,7 @@
   "devDependencies": {
     "@biomejs/biome": "^2.5.2",
     "@changesets/cli": "^2.31.0",
-    "@types/node": "^20.19.43"
+    "@types/node": "^20.19.43",
+    "typescript": "^5.9.3"
   }
 }
