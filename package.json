@@ -27,11 +27,12 @@
 	],
 	"scripts": {
 		"lint": "biome check .",
-		"lint:fix": "biome check --fix .",
+		"lint:fix": "biome check --write .",
 		"test": "node scripts/run-tests.mjs",
 		"typecheck": "tsc --noEmit",
 		"version": "changeset version",
-		"release": "changeset publish"
+		"release": "changeset publish",
+		"prepare": "husky"
 	},
 	"publishConfig": {
 		"access": "public"
@@ -43,6 +44,7 @@
 		"@biomejs/biome": ">=2.5.3",
 		"@changesets/cli": "2.31.0",
 		"@types/node": "^26",
+		"husky": "9.1.7",
 		"typescript": "^6"
 	}
 }
