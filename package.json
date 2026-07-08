@@ -36,8 +36,11 @@
 	"publishConfig": {
 		"access": "public"
 	},
+	"peerDependencies": {
+		"@biomejs/biome": ">=2.5.3"
+	},
 	"devDependencies": {
-		"@biomejs/biome": "2.5.2",
+		"@biomejs/biome": ">=2.5.3",
 		"@changesets/cli": "2.31.0",
 		"@types/node": "^26",
 		"typescript": "^6"

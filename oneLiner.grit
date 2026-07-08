@@ -1,9 +1,7 @@
 engine biome(0.1)
 language js
 
-// Collapse single-statement blocks into one-liners.
-//
-// Mirrors scripts/refactor-one-liners.ts:
+// Collapse single-statement blocks into one-liners:
 //   if (cond) { return x; }      ->  if (cond) return x;
 //   if (cond) { stmt; }          ->  if (cond) stmt;
 //   else if (cond) { stmt; }     ->  else if (cond) stmt;   (on its own line)

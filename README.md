@@ -1,5 +1,7 @@
 # biome-one-liner-plugin
 
+[![npm](https://img.shields.io/npm/v/biome-one-liner-plugin.svg)](https://www.npmjs.com/package/biome-one-liner-plugin)
+
 A [Biome](https://biomejs.dev) plugin (written in
 [GritQL](https://biomejs.dev/blog/gritql-biome)) that collapses single-statement
 blocks into one-liners — turning the verbose form on the left into the tidy form
@@ -160,7 +162,7 @@ npx @biomejs/biome lint --write example.ts
 
 Snapshot tests live in [tests/](tests/). Each case is a pair:
 `tests/fixtures/<name>.input.ts` (before) and `<name>.expected.ts` (after). The
-runner ([tests/run.mjs](tests/run.mjs)) runs `biome lint --write` on each input
+runner ([scripts/run-tests.mjs](scripts/run-tests.mjs)) runs `biome lint --write` on each input
 with only the plugin enabled (no other lint rules) and compares against the
 expected output.
 
