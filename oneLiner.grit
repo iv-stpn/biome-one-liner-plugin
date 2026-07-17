@@ -13,7 +13,12 @@ language js
 //   label: { stmt; }             ->  label: stmt;
 //   (x) => { return expr; }      ->  (x) => expr;
 //
-// A block is left untouched when its single statement:
+// Warn (no automatic fix) on multiline definitions:
+//   type Foo = {\n...\n}         ->  warn: may fit on one line
+//   const x = {\n…\n}            ->  warn: may fit on one line
+//   const x = [\n…\n]            ->  warn: may fit on one line
+//
+// A block is left untouched (or a type declaration is not warned) when it:
 //   - is itself a control-flow statement (if / for / while / do-while /
 //     switch), matching the original script and avoiding dangling-else
 //     hazards;
@@ -53,6 +58,12 @@ pattern lexical_declaration() {
 // keeps the block intact so no documentation is silently dropped.
 pattern has_comment() {
     or { r"[\s\S]*//[\s\S]*", r"[\s\S]*/\*[\s\S]*" }
+}
+
+// Matches a TsObjectType whose only content is a single property signature
+// (no methods, no index signatures, no mapped types).
+pattern single_member_object_type($member) {
+    TsObjectType(members=[$member])
 }
 
 or {
@@ -217,6 +228,36 @@ else $s`
         } else {
             $body => `$ret`
         }
+    },
+
+    // Single-member `type Foo = { … }` declaration → safe autofix: collapse to one line.
+    // The body must be a TsObjectType with exactly one member and no comment.
+    TsTypeAliasDeclaration(binding_identifier=$name, type_parameters=$tparams, ty=$body) as $type_decl where {
+        $type_decl <: r"[\s\S]*\n[\s\S]*",
+        not $type_decl <: has_comment(),
+        $body <: single_member_object_type($member),
+        register_diagnostic(span=$type_decl, message="Collapse this single-member type alias to a one-liner.", severity="warn", fix_kind="safe"),
+        $type_decl => `type $name$tparams = { $member }`
+    },
+
+    // Multi-member or non-object `type Foo = …` declaration → warn only (fixer handles it).
+    TsTypeAliasDeclaration() as $type_decl where {
+        $type_decl <: r"[\s\S]*\n[\s\S]*",
+        not $type_decl <: has_comment(),
+        register_diagnostic(span=$type_decl, message="This type alias spans multiple lines and may fit on one line.", severity="warn")
+    },
+
+    // `const x = {\n  …\n}` — multiline object initializer in a variable declaration.
+    JsVariableDeclarator(initializer=JsInitializerClause(expression=JsObjectExpression() as $expr)) as $decl where {
+        $decl <: r"[\s\S]*\n[\s\S]*",
+        not $decl <: has_comment(),
+        register_diagnostic(span=$decl, message="This object definition spans multiple lines and may fit on one line.", severity="warn")
+    },
+
+    // `const x = [\n  …\n]` — multiline array initializer in a variable declaration.
+    JsVariableDeclarator(initializer=JsInitializerClause(expression=JsArrayExpression() as $expr)) as $decl where {
+        $decl <: r"[\s\S]*\n[\s\S]*",
+        not $decl <: has_comment(),
+        register_diagnostic(span=$decl, message="This array definition spans multiple lines and may fit on one line.", severity="warn")
     }
 }
-

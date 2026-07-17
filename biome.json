@@ -1,23 +1,29 @@
 {
-	"$schema": "./node_modules/@biomejs/biome/configuration_schema.json",
-	"plugins": ["./oneLiner.grit"],
-	"linter": {
-		"rules": {
-			"preset": "recommended"
-		}
-	},
-	"files": {
-		"includes": [
-			"**/*.json",
-			"**/*.js",
-			"**/*.jsx",
-			"**/*.ts",
-			"**/*.tsx",
-			"**/*.mjs",
-			"**/*.cjs",
-			"!tests",
-			"!node_modules",
-			"!example.ts"
-		]
-	}
+  "$schema": "./node_modules/@biomejs/biome/configuration_schema.json",
+  "plugins": ["./oneLiner.grit"],
+  "formatter": {
+    "enabled": true,
+    "indentStyle": "space",
+    "indentWidth": 2,
+    "lineWidth": 130
+  },
+  "linter": {
+    "rules": {
+      "preset": "recommended"
+    }
+  },
+  "files": {
+    "includes": [
+      "**/*.json",
+      "**/*.js",
+      "**/*.jsx",
+      "**/*.ts",
+      "**/*.tsx",
+      "**/*.mjs",
+      "**/*.cjs",
+      "!tests",
+      "!node_modules",
+      "!example.ts"
+    ]
+  }
 }
