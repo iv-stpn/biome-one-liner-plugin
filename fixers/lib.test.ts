@@ -68,6 +68,30 @@ describe("type alias collapse", () => {
     const src = `${PREFIX}type Result = {\n  data: Array<\n    | { ok: true }\n    | { ok: false }\n  >;\n};\n`;
     expect(run(src, ["type Result"])).toBe(src);
   });
+
+  test("exported type alias → collapsed, `export` preserved", () => {
+    // Regression: Biome reports the span at the `type` keyword (after `export`),
+    // but TS's TypeAliasDeclaration.getStart() returns the `export` position, so
+    // an exact-start match found nothing and every exported alias was skipped.
+    const src = `${PREFIX}export type ShareLinkFileKey = {\n  wrappedFileKey: string;\n  wrappedFileKeyNonce: string;\n};\n`;
+    expect(run(src, ["type ShareLinkFileKey"])).toBe(
+      `${PREFIX}export type ShareLinkFileKey = { wrappedFileKey: string; wrappedFileKeyNonce: string };\n`,
+    );
+  });
+
+  test("intersection type alias → only the literal collapsed, `&` member preserved", () => {
+    // Regression: node.type is an IntersectionType, not a TypeLiteral, so the
+    // old `!isTypeLiteralNode(type)` guard skipped these entirely.
+    const src = `${PREFIX}export type OrganizationInviteForRecipient = OrganizationInvite & {\n  organizationName: string;\n};\n`;
+    expect(run(src, ["type OrganizationInviteForRecipient"])).toBe(
+      `${PREFIX}export type OrganizationInviteForRecipient = OrganizationInvite & { organizationName: string };\n`,
+    );
+  });
+
+  test("union type alias → only the literal collapsed, `|` members preserved", () => {
+    const src = `${PREFIX}type Result = Ok | {\n  error: string;\n  code: number;\n};\n`;
+    expect(run(src, ["type Result"])).toBe(`${PREFIX}type Result = Ok | { error: string; code: number };\n`);
+  });
 });
 
 describe("object definition collapse", () => {

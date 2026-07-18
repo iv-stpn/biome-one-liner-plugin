@@ -101,23 +101,30 @@ function applyEdits(source: string, edits: readonly Edit[]): string {
   return out;
 }
 
-/** Walk the AST and find a node that starts at exactly `offset`. Returns the
- *  first node found via DFS whose getStart() equals the offset. */
-function nodeStartingAt(sf: ts.SourceFile, offset: number): ts.Node | undefined {
-  let found: ts.Node | undefined;
+/** Find the innermost TypeAliasDeclaration or VariableDeclaration whose
+ *  [getStart, getEnd) range contains `offset`, preferring the narrowest match.
+ *
+ *  Biome reports the diagnostic span at the declaration's first significant
+ *  token, which is not always where TypeScript's `getStart()` lands. For an
+ *  `export type Foo = …` alias, Biome points at the `type` keyword while TS
+ *  includes the `export` modifier in `getStart()` — so an exact-`getStart`
+ *  match misses every exported alias. Containment (rather than exact start)
+ *  resolves both the `export`-prefixed alias and the bare `const x = …`
+ *  declarator (whose Biome span starts at the name, which TS agrees on). */
+function declarationAtOffset(sf: ts.SourceFile, offset: number): ts.TypeAliasDeclaration | ts.VariableDeclaration | undefined {
+  let best: ts.TypeAliasDeclaration | ts.VariableDeclaration | undefined;
   const visit = (node: ts.Node): void => {
-    if (found !== undefined) return;
     const start = node.getStart(sf);
-    if (start === offset) {
-      found = node;
-      return;
-    }
+    const end = node.getEnd();
     // Prune subtrees that cannot contain the offset.
-    if (start > offset || node.getEnd() < offset) return;
+    if (offset < start || offset >= end) return;
+    if (ts.isTypeAliasDeclaration(node) || ts.isVariableDeclaration(node)) {
+      if (best === undefined || end - start < best.getEnd() - best.getStart(sf)) best = node;
+    }
     ts.forEachChild(node, visit);
   };
   visit(sf);
-  return found;
+  return best;
 }
 
 /** Strip leading/trailing whitespace and a single trailing semicolon (for
@@ -142,9 +149,15 @@ export interface PlanResult {
  * For each offset it locates the AST node and collapses it to a one-liner,
  * joining every member/element (not just the first) so nothing is dropped:
  *
- *   type Foo = {\n  a: T\n  b: U\n}   →  type Foo = { a: T; b: U }
- *   const x = {\n  k: v\n  k2: v2\n}  →  const x = { k: v, k2: v2 }
- *   const x = [\n  a\n  b\n]          →  const x = [a, b]
+ *   type Foo = {\n  a: T\n  b: U\n}            →  type Foo = { a: T; b: U }
+ *   export type Bar = Foo & {\n  x: T\n}        →  export type Bar = Foo & { x: T }
+ *   const x = {\n  k: v\n  k2: v2\n}            →  const x = { k: v, k2: v2 }
+ *   const x = [\n  a\n  b\n]                    →  const x = [a, b]
+ *
+ * For type aliases only each multiline `{ … }` block is rewritten, so `export`,
+ * the name, type parameters, and any intersection/union members are preserved —
+ * the alias need not be a bare type literal. Variables rewrite only the
+ * initializer for the same reason.
  *
  * A collapse is only emitted when the result is a genuine single line. A node
  * whose member/element is itself multiline (e.g. a union nested inside
@@ -163,62 +176,72 @@ export function planFileEdits(fileName: string, source: string, offsets: readonl
   let seq = 0;
 
   for (const offset of [...offsets].sort((a, b) => a - b)) {
-    const node = nodeStartingAt(sf, offset);
+    const node = declarationAtOffset(sf, offset);
     if (node === undefined) continue;
 
-    let editStart: number;
-    let editEnd: number;
-    let collapsed: string | undefined;
+    if (ts.isTypeAliasDeclaration(node)) {
+      // Collapse every multiline type literal *within* the alias's type, rather
+      // than reconstructing the whole declaration. This preserves the `export`
+      // keyword, the alias name, type parameters, and any surrounding
+      // intersection/union members (`Foo & { … }`, `Foo | { … }`), only joining
+      // each `{ … }` block's members onto one line. An alias whose type is
+      // itself a literal, an intersection, or a union is handled uniformly.
+      const literals: ts.TypeLiteralNode[] = [];
+      const collect = (n: ts.Node): void => {
+        if (ts.isTypeLiteralNode(n) && n.getText(sf).includes("\n")) literals.push(n);
+        ts.forEachChild(n, collect);
+      };
+      collect(node.type);
+      for (const lit of literals) {
+        const litText = lit.getText(sf);
+        // Skip when the literal carries a comment, so no documentation is dropped.
+        if (litText.includes("//") || litText.includes("/*")) continue;
+        if (lit.members.length === 0) continue;
+        const members = lit.members.map((m) => trimMember(m.getText(sf)));
+        const collapsed = `{ ${members.join("; ")} }`;
+        // Only emit when the result is a genuine one-liner. A member that is
+        // itself multiline leaves a newline in the joined text; collapsing the
+        // outer braces wouldn't silence the diagnostic and would make the fixer
+        // re-"fix" the same site on every run (non-idempotent). Skip those.
+        if (collapsed.includes("\n")) continue;
+        edits.push({ start: lit.getStart(sf), end: lit.getEnd(), text: collapsed, seq: seq++ });
+      }
+      continue;
+    }
+
+    // VariableDeclaration: collapse only the initializer, so `export`/`const`/
+    // the name/any type annotation are preserved.
+    const init = node.initializer;
+    if (init === undefined) continue;
+
     // The exact source slice that will be replaced, so the comment guard below
     // only flags comments that would actually be dropped — not leading trivia
     // (a `//` line above the declaration) which the edit never touches.
-    let replaced: string | undefined;
-
-    if (ts.isTypeAliasDeclaration(node)) {
-      const type = node.type;
-      if (!ts.isTypeLiteralNode(type)) continue;
-      // An empty type literal `{}` is already a one-liner; nothing to collapse.
-      if (type.members.length === 0) continue;
-
-      const members = type.members.map((m) => trimMember(m.getText(sf)));
-      const name = node.name.text;
-      const tparams = node.typeParameters ? `<${node.typeParameters.map((p) => p.getText(sf)).join(", ")}>` : "";
-      editStart = node.getStart(sf);
-      editEnd = node.getEnd();
-      replaced = node.getText(sf);
-      collapsed = `type ${name}${tparams} = { ${members.join("; ")} };`;
-    } else if (ts.isVariableDeclaration(node)) {
-      const init = node.initializer;
-      if (init === undefined) continue;
-
-      // The edit rewrites only the initializer, so guard against comments inside
-      // it (a comment in the type annotation or preceding the declarator is left
-      // untouched and must not block the collapse).
-      replaced = init.getText(sf);
-      if (ts.isObjectLiteralExpression(init)) {
-        if (init.properties.length === 0) continue;
-        const props = init.properties.map((p) => p.getText(sf).trim());
-        editStart = init.getStart(sf);
-        editEnd = init.getEnd();
-        collapsed = `{ ${props.join(", ")} }`;
-      } else if (ts.isArrayLiteralExpression(init)) {
-        if (init.elements.length === 0) continue;
-        const elems = init.elements.map((e) => e.getText(sf).trim());
-        editStart = init.getStart(sf);
-        editEnd = init.getEnd();
-        collapsed = `[${elems.join(", ")}]`;
-      } else continue;
+    const replaced = init.getText(sf);
+    let editStart: number;
+    let editEnd: number;
+    let collapsed: string | undefined;
+    if (ts.isObjectLiteralExpression(init)) {
+      if (init.properties.length === 0) continue;
+      const props = init.properties.map((p) => p.getText(sf).trim());
+      editStart = init.getStart(sf);
+      editEnd = init.getEnd();
+      collapsed = `{ ${props.join(", ")} }`;
+    } else if (ts.isArrayLiteralExpression(init)) {
+      if (init.elements.length === 0) continue;
+      const elems = init.elements.map((e) => e.getText(sf).trim());
+      editStart = init.getStart(sf);
+      editEnd = init.getEnd();
+      collapsed = `[${elems.join(", ")}]`;
     } else continue;
 
     // Defensive: skip when the replaced region carries a comment, so no
     // documentation is silently dropped.
-    if (replaced === undefined || replaced.includes("//") || replaced.includes("/*")) continue;
+    if (replaced.includes("//") || replaced.includes("/*")) continue;
 
-    // Only emit when the result is a genuine one-liner. A member/element that is
-    // itself multiline leaves a newline in the joined text; collapsing the outer
-    // braces wouldn't silence the diagnostic and would make the fixer re-"fix"
-    // the same site on every run (non-idempotent). Skip those.
-    if (collapsed === undefined || collapsed.includes("\n")) continue;
+    // Only emit when the result is a genuine one-liner (see the type-literal
+    // note above for why non-one-liners are skipped).
+    if (collapsed.includes("\n")) continue;
 
     edits.push({ start: editStart, end: editEnd, text: collapsed, seq: seq++ });
   }
