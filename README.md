@@ -141,30 +141,34 @@ const config = { enabled: true };
 const flags = ["a"];
 ```
 
+The plugin only **warns** on these — `biome lint --write` leaves them multiline.
+The "after" form above is produced by the `collapse-object-definitions` fixer
+described below.
+
 What gets warned, and what gets fixed automatically:
 
 | Construct                          | Diagnostic                                                    | Auto-fixed by Biome?                       |
 | ---------------------------------- | ------------------------------------------------------------- | ------------------------------------------ |
-| `type Foo = { one member }`        | "Collapse this single-member type alias to a one-liner."      | Yes — safe `--write` fix from the plugin.  |
-| `type Foo = { … }` (multi-member)  | "This type alias spans multiple lines and may fit on one line." | No — warn only.                         |
+| `type Foo = { … }` (any members)   | "This type alias spans multiple lines and may fit on one line." | No — warn only.                         |
 | `const x = { … }` (object)         | "This object definition spans multiple lines and may fit on one line." | No — warn only.                  |
 | `const x = [ … ]` (array)          | "This array definition spans multiple lines and may fit on one line." | No — warn only.                     |
 
-The object and array warnings are gated on a line-width check (the collapsed
-one-liner must plausibly fit within **110 columns** — see the `fits_on_one_line`
-guard in [oneLiner.grit](oneLiner.grit)), so a definition whose own content
-already exceeds the line width stays silent. As with blocks, any definition
-containing a comment is left untouched so nothing is silently dropped.
+None of these definitions have a GritQL rewrite, so none are applied by
+`biome lint --write` — single- and multi-member type aliases are treated the
+same. The warnings are gated on a line-width check (the collapsed one-liner must
+plausibly fit within **110 columns** — see the `fits_on_one_line` guard in
+[oneLiner.grit](oneLiner.grit)), so a definition whose own content already
+exceeds the line width stays silent. As with blocks, any definition containing a
+comment is left untouched so nothing is silently dropped.
 
 ### The `collapse-object-definitions` fixer
 
-The warn-only cases (multi-member type aliases, object and array initializers)
-have no GritQL rewrite, so they are not applied by `biome lint --write`. A
-separate fixer script closes that gap. It re-runs Biome to collect the plugin's
-diagnostics, then uses the TypeScript compiler to locate each flagged node,
-verify it has exactly one member/element, and replace its text with a collapsed
-one-liner. It is **idempotent** — an already-collapsed site no longer emits the
-diagnostic, so re-running is a no-op.
+Because the warnings above have no GritQL rewrite, `biome lint --write` leaves
+every one of them in place. A separate fixer script closes that gap. It re-runs
+Biome to collect the plugin's diagnostics, then uses the TypeScript compiler to
+locate each flagged node, join its members/elements onto a single line, and
+replace its text with a collapsed one-liner. It is **idempotent** — an
+already-collapsed site no longer emits the diagnostic, so re-running is a no-op.
 
 The fixer lives in [fixers/collapse-object-definitions.ts](fixers/collapse-object-definitions.ts)
 and is shipped with the package (its `@typescript/typescript6` dependency is
@@ -184,8 +188,8 @@ Flags:
 - `--help` / `-h` — print usage.
 
 Paths default to the current directory. Run it **after** `biome check --write`
-so the plugin's own safe fixes (single-member type aliases, block collapses)
-apply first, leaving the fixer to handle only the warn-only definitions.
+so the plugin's own safe fixes (block collapses) apply first, leaving the fixer
+to handle the warn-only definitions.
 
 ## Usage
 
@@ -218,8 +222,8 @@ Without `--write`, the plugin only reports diagnostics (severity `warn`, code
 `plugin`), so you can review before applying.
 
 `biome lint --write` applies only the plugin's safe GritQL fixes (block
-collapses and single-member type aliases). To also collapse the warn-only
-multiline object/array/type definitions, run the
+collapses). Multiline object/array/type definitions are warn-only in the plugin,
+so to collapse them run the
 [`collapse-object-definitions` fixer](#the-collapse-object-definitions-fixer)
 afterwards:
 

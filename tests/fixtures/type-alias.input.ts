@@ -15,7 +15,7 @@ interface Size {
   height: number;
 }
 
-// Single-member type alias — should be collapsed to one line.
+// Single-member type alias — warn only (the fixer collapses it, not biome --write).
 type HeaderContextValue = {
   closeButtonAccessory: React.ReactNode | null;
 };

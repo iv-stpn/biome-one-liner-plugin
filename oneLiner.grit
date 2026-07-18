@@ -62,12 +62,6 @@ pattern has_comment() {
     or { r"[\s\S]*//[\s\S]*", r"[\s\S]*/\*[\s\S]*" }
 }
 
-// Matches a TsObjectType whose only content is a single property signature
-// (no methods, no index signatures, no mapped types).
-pattern single_member_object_type($member) {
-    TsObjectType(members=[$member])
-}
-
 // A node whose collapsed one-liner would fit within the line width (110
 // columns). The "may fit on one line" warnings below are only useful when the
 // one-liner actually fits, so they gate on this.
@@ -250,20 +244,12 @@ else $s`
         }
     },
 
-    // Single-member `type Foo = { … }` declaration → safe autofix: collapse to one line.
-    // The body must be a TsObjectType with exactly one member and no comment.
-    TsTypeAliasDeclaration(binding_identifier=$name, type_parameters=$tparams, ty=$body) as $type_decl where {
-        $type_decl <: r"[\s\S]*\n[\s\S]*",
-        not $type_decl <: has_comment(),
-        $body <: single_member_object_type($member),
-        register_diagnostic(span=$type_decl, message="Collapse this single-member type alias to a one-liner.", severity="warn", fix_kind="safe"),
-        $type_decl => `type $name$tparams = { $member }`
-    },
-
-    // Multi-member or non-object `type Foo = …` declaration → warn only. Gated
-    // on fits_on_one_line so a definition whose own content exceeds the line
-    // width (summed across every line of the node, not just the first) stays
-    // silent: the "may fit on one line" advice is only useful when it can.
+    // `type Foo = …` declaration → warn only. Gated on fits_on_one_line so a
+    // definition whose own content exceeds the line width (summed across every
+    // line of the node, not just the first) stays silent: the "may fit on one
+    // line" advice is only useful when it can. The actual collapse is left to
+    // the `collapse-object-definitions` fixer — the grit never rewrites these,
+    // so single- and multi-member aliases are treated identically.
     TsTypeAliasDeclaration() as $type_decl where {
         $type_decl <: r"[\s\S]*\n[\s\S]*",
         not $type_decl <: has_comment(),

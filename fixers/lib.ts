@@ -1,11 +1,11 @@
 // Shared engine for the collapse-object-definitions fixer.
 //
-// The GritQL rules for multiline type aliases, interfaces, object initializers,
-// and array initializers are diagnostic-only for multi-member nodes (no GritQL
-// rewrite). This engine applies those collapses: it runs Biome to collect the
-// plugin's diagnostics, then uses the TypeScript compiler to locate each flagged
-// node, join its members/elements onto a single line, and replace its text with
-// the collapsed one-liner.
+// The GritQL rules for multiline type aliases, object initializers, and array
+// initializers are diagnostic-only (no GritQL rewrite) — single- and
+// multi-member nodes alike. This engine applies those collapses: it runs Biome
+// to collect the plugin's diagnostics, then uses the TypeScript compiler to
+// locate each flagged node, join its members/elements onto a single line, and
+// replace its text with the collapsed one-liner.
 //
 // Run via the sibling entry script (collapse-object-definitions.ts).
 import { execFileSync } from "node:child_process";
@@ -241,7 +241,6 @@ export interface FixerConfig {
 
 /** Message substrings that identify this fixer's target diagnostics. */
 const TARGET_MESSAGES = [
-  "Collapse this single-member type alias",
   "This type alias spans multiple lines",
   "This object definition spans multiple lines",
   "This array definition spans multiple lines",
