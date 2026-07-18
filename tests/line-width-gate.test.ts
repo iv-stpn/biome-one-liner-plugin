@@ -101,14 +101,13 @@ describe("line-width gate on multiline definition warnings", () => {
     const dir = withPluginDir();
     try {
       const file = join(dir, "sample.ts");
-      // ~70 non-whitespace chars — under 80, so it should still be warned.
+      // ~104 non-whitespace chars — just under the 110-column reference, so it
+      // should still be warned.
       writeFileSync(
         file,
         [
-          'const mediumObj = {',
-          '  apiUrl: "example.com/api/v2/endpoint",',
-          '  timeout: 5000,',
-          '  retries: 3,',
+          'const nearWidth = {',
+          '  key: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",',
           '};',
           '',
         ].join("\n"),

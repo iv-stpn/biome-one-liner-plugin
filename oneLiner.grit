@@ -68,9 +68,9 @@ pattern single_member_object_type($member) {
     TsObjectType(members=[$member])
 }
 
-// A node whose collapsed one-liner would fit within Biome's default line width
-// (80 columns). The "may fit on one line" warnings below are only useful when
-// the one-liner actually fits, so they gate on this.
+// A node whose collapsed one-liner would fit within the line width (110
+// columns). The "may fit on one line" warnings below are only useful when the
+// one-liner actually fits, so they gate on this.
 //
 // GritQL cannot read the consumer's configured `lineWidth` and cannot collapse
 // whitespace to measure the exact one-liner, so this bounds the count of
@@ -79,11 +79,11 @@ pattern single_member_object_type($member) {
 // shrink), so once that count exceeds the line width the one-liner cannot fit
 // and a "may fit" warning would be wrong. This is a conservative necessary
 // condition: it stays silent on some definitions that would fit (notably in
-// configs wider than 80, and multiline nodes whose raw text is long but whose
+// configs wider than 110, and multiline nodes whose raw text is long but whose
 // one-liner is short), but it never warns on a definition whose own content is
-// too long for the line. Bump the `{0,80}` repetition to match a wider config.
+// too long for the line. Bump the `{0,110}` repetition to match a wider config.
 pattern fits_on_one_line() {
-    r"^\s*(?:[^\s]\s*){0,80}$"
+    r"^\s*(?:[^\s]\s*){0,110}$"
 }
 
 or {
