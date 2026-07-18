@@ -116,6 +116,77 @@ and expressions are left alone, since converting them would change hoisting and
 `this`/`arguments` semantics and can drop `async`/generator/return-type
 information.
 
+## Collapsing multiline object/array/type definitions
+
+Beyond control-flow blocks, the plugin also flags multiline definitions that
+read fine on a single line:
+
+```ts
+// before
+type Point = {
+  x: number;
+};
+
+const config = {
+  enabled: true,
+};
+
+const flags = [
+  "a",
+];
+
+// after
+type Point = { x: number };
+const config = { enabled: true };
+const flags = ["a"];
+```
+
+What gets warned, and what gets fixed automatically:
+
+| Construct                          | Diagnostic                                                    | Auto-fixed by Biome?                       |
+| ---------------------------------- | ------------------------------------------------------------- | ------------------------------------------ |
+| `type Foo = { one member }`        | "Collapse this single-member type alias to a one-liner."      | Yes — safe `--write` fix from the plugin.  |
+| `type Foo = { … }` (multi-member)  | "This type alias spans multiple lines and may fit on one line." | No — warn only.                         |
+| `const x = { … }` (object)         | "This object definition spans multiple lines and may fit on one line." | No — warn only.                  |
+| `const x = [ … ]` (array)          | "This array definition spans multiple lines and may fit on one line." | No — warn only.                     |
+
+The object and array warnings are gated on a line-width check (the collapsed
+one-liner must plausibly fit within **110 columns** — see the `fits_on_one_line`
+guard in [oneLiner.grit](oneLiner.grit)), so a definition whose own content
+already exceeds the line width stays silent. As with blocks, any definition
+containing a comment is left untouched so nothing is silently dropped.
+
+### The `collapse-object-definitions` fixer
+
+The warn-only cases (multi-member type aliases, object and array initializers)
+have no GritQL rewrite, so they are not applied by `biome lint --write`. A
+separate fixer script closes that gap. It re-runs Biome to collect the plugin's
+diagnostics, then uses the TypeScript compiler to locate each flagged node,
+verify it has exactly one member/element, and replace its text with a collapsed
+one-liner. It is **idempotent** — an already-collapsed site no longer emits the
+diagnostic, so re-running is a no-op.
+
+The fixer lives in [fixers/collapse-object-definitions.ts](fixers/collapse-object-definitions.ts)
+and is shipped with the package (its `@typescript/typescript6` dependency is
+installed alongside the plugin), so consumers can run it directly. Invoke it
+through `bun`, pointing it at the files you want to fix:
+
+```sh
+# from your project (with biome-one-liner-plugin installed)
+bun run node_modules/biome-one-liner-plugin/fixers/collapse-object-definitions.ts [paths...]
+# or, in a checkout of this repo:
+npm run fixer:object-defs -- [paths...]
+```
+
+Flags:
+
+- `--dry-run` — show what would change without writing.
+- `--help` / `-h` — print usage.
+
+Paths default to the current directory. Run it **after** `biome check --write`
+so the plugin's own safe fixes (single-member type aliases, block collapses)
+apply first, leaving the fixer to handle only the warn-only definitions.
+
 ## Usage
 
 Install the plugin as a dev dependency:
@@ -145,6 +216,17 @@ npx @biomejs/biome check --write <files>
 
 Without `--write`, the plugin only reports diagnostics (severity `warn`, code
 `plugin`), so you can review before applying.
+
+`biome lint --write` applies only the plugin's safe GritQL fixes (block
+collapses and single-member type aliases). To also collapse the warn-only
+multiline object/array/type definitions, run the
+[`collapse-object-definitions` fixer](#the-collapse-object-definitions-fixer)
+afterwards:
+
+```sh
+npx @biomejs/biome lint --write <files>
+bun run node_modules/biome-one-liner-plugin/fixers/collapse-object-definitions.ts <files>
+```
 
 Requires Biome **2.5+** (GritQL plugins with code-fixes landed in v2.5).
 
