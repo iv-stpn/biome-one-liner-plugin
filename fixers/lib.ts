@@ -4,8 +4,8 @@
 // and array initializers are diagnostic-only for multi-member nodes (no GritQL
 // rewrite). This engine applies those collapses: it runs Biome to collect the
 // plugin's diagnostics, then uses the TypeScript compiler to locate each flagged
-// node, check it has exactly one member/element, and replace its text with a
-// collapsed one-liner.
+// node, join its members/elements onto a single line, and replace its text with
+// the collapsed one-liner.
 //
 // Run via the sibling entry script (collapse-object-definitions.ts).
 import { execFileSync } from "node:child_process";
@@ -139,15 +139,21 @@ export interface PlanResult {
  * (each the start of a flagged node). PURE — takes offsets, not Biome — so it
  * is unit-testable without spawning the linter.
  *
- * For each offset it locates the AST node, checks it has exactly one
- * member/element, and if so collapses it to a one-liner. Multi-member nodes are
- * skipped silently. Nodes whose text contains a comment are skipped so no
- * documentation is silently dropped.
+ * For each offset it locates the AST node and collapses it to a one-liner,
+ * joining every member/element (not just the first) so nothing is dropped:
  *
- * Collapse rules:
- *   type Foo = {\n  prop: T\n}       →  type Foo = { prop: T }
- *   const x = {\n  key: val\n}      →  const x = { key: val }
- *   const x = [\n  item\n]          →  const x = [item]
+ *   type Foo = {\n  a: T\n  b: U\n}   →  type Foo = { a: T; b: U }
+ *   const x = {\n  k: v\n  k2: v2\n}  →  const x = { k: v, k2: v2 }
+ *   const x = [\n  a\n  b\n]          →  const x = [a, b]
+ *
+ * A collapse is only emitted when the result is a genuine single line. A node
+ * whose member/element is itself multiline (e.g. a union nested inside
+ * `Array<…>`) yields a collapsed text that still spans multiple lines; rewriting
+ * its outer braces would not silence the diagnostic and would make the fixer
+ * non-idempotent (re-"fixing" the same site every run). Such nodes are skipped.
+ *
+ * Nodes whose text contains a comment are also skipped so no documentation is
+ * silently dropped.
  */
 export function planFileEdits(fileName: string, source: string, offsets: readonly number[]): PlanResult {
   if (offsets.length === 0) return { output: source, count: 0 };
@@ -160,50 +166,59 @@ export function planFileEdits(fileName: string, source: string, offsets: readonl
     const node = nodeStartingAt(sf, offset);
     if (node === undefined) continue;
 
-    // Defensive: skip nodes whose source contains a comment.
-    const nodeText = node.getFullText(sf);
-    if (nodeText.includes("//") || nodeText.includes("/*")) continue;
-
     let editStart: number;
     let editEnd: number;
-    let collapsed: string;
+    let collapsed: string | undefined;
+    // The exact source slice that will be replaced, so the comment guard below
+    // only flags comments that would actually be dropped — not leading trivia
+    // (a `//` line above the declaration) which the edit never touches.
+    let replaced: string | undefined;
 
     if (ts.isTypeAliasDeclaration(node)) {
       const type = node.type;
       if (!ts.isTypeLiteralNode(type)) continue;
+      // An empty type literal `{}` is already a one-liner; nothing to collapse.
+      if (type.members.length === 0) continue;
 
-      // Only single-member type aliases are collapsible. A multi-member alias is
-      // warned ("may fit on one line") but must be left intact: collapsing it to
-      // the first member would silently drop every member after it.
-      if (type.members.length !== 1) continue;
-
-      const member = type.members[0];
-      if (!member) continue;
-
-      const memberText = trimMember(member.getText(sf));
+      const members = type.members.map((m) => trimMember(m.getText(sf)));
       const name = node.name.text;
       const tparams = node.typeParameters ? `<${node.typeParameters.map((p) => p.getText(sf)).join(", ")}>` : "";
       editStart = node.getStart(sf);
       editEnd = node.getEnd();
-      collapsed = `type ${name}${tparams} = { ${memberText} };`;
+      replaced = node.getText(sf);
+      collapsed = `type ${name}${tparams} = { ${members.join("; ")} };`;
     } else if (ts.isVariableDeclaration(node)) {
       const init = node.initializer;
       if (init === undefined) continue;
 
+      // The edit rewrites only the initializer, so guard against comments inside
+      // it (a comment in the type annotation or preceding the declarator is left
+      // untouched and must not block the collapse).
+      replaced = init.getText(sf);
       if (ts.isObjectLiteralExpression(init)) {
-        if (init.properties.length !== 1) continue;
-        const propText = init.properties[0]?.getText(sf).trim();
+        if (init.properties.length === 0) continue;
+        const props = init.properties.map((p) => p.getText(sf).trim());
         editStart = init.getStart(sf);
         editEnd = init.getEnd();
-        collapsed = `{ ${propText} }`;
+        collapsed = `{ ${props.join(", ")} }`;
       } else if (ts.isArrayLiteralExpression(init)) {
-        if (init.elements.length !== 1) continue;
-        const elemText = init.elements[0]?.getText(sf).trim();
+        if (init.elements.length === 0) continue;
+        const elems = init.elements.map((e) => e.getText(sf).trim());
         editStart = init.getStart(sf);
         editEnd = init.getEnd();
-        collapsed = `[${elemText}]`;
+        collapsed = `[${elems.join(", ")}]`;
       } else continue;
     } else continue;
+
+    // Defensive: skip when the replaced region carries a comment, so no
+    // documentation is silently dropped.
+    if (replaced === undefined || replaced.includes("//") || replaced.includes("/*")) continue;
+
+    // Only emit when the result is a genuine one-liner. A member/element that is
+    // itself multiline leaves a newline in the joined text; collapsing the outer
+    // braces wouldn't silence the diagnostic and would make the fixer re-"fix"
+    // the same site on every run (non-idempotent). Skip those.
+    if (collapsed === undefined || collapsed.includes("\n")) continue;
 
     edits.push({ start: editStart, end: editEnd, text: collapsed, seq: seq++ });
   }

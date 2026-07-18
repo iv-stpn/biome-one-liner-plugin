@@ -49,16 +49,24 @@ describe("type alias collapse", () => {
     expect(run(src, ["type A", "type B"])).toBe(`${PREFIX}type A = { p: number };\ntype B = { q: string };\n`);
   });
 
-  test("multi-member type alias → skipped, source unchanged (no members dropped)", () => {
-    // Regression: the fixer used to collapse this to the first member only,
-    // silently dropping every member after it. It must leave it intact.
+  test("multi-member type alias → all members joined onto one line (none dropped)", () => {
+    // Regression: the fixer used to skip multi-member aliases, leaving the
+    // diagnostic unfixed. It now joins every member so nothing is dropped.
     const src = `${PREFIX}type Point = {\n  x: number;\n  y: number;\n};\n`;
-    expect(run(src, ["type Point"])).toBe(src);
+    expect(run(src, ["type Point"])).toBe(`${PREFIX}type Point = { x: number; y: number };\n`);
   });
 
-  test("multi-member generic type alias → skipped, source unchanged", () => {
+  test("multi-member generic type alias → all members joined, type params preserved", () => {
     const src = `${PREFIX}type Choice<T> = {\n  a: T;\n  b: string;\n  c: number;\n};\n`;
-    expect(run(src, ["type Choice"])).toBe(src);
+    expect(run(src, ["type Choice"])).toBe(`${PREFIX}type Choice<T> = { a: T; b: string; c: number };\n`);
+  });
+
+  test("member that is itself multiline → skipped (collapse would not be a one-liner)", () => {
+    // A single-member alias whose member spans multiple lines (e.g. a union
+    // nested in Array<…>) cannot become a genuine one-liner by collapsing the
+    // outer braces. It must be skipped so the fixer stays idempotent.
+    const src = `${PREFIX}type Result = {\n  data: Array<\n    | { ok: true }\n    | { ok: false }\n  >;\n};\n`;
+    expect(run(src, ["type Result"])).toBe(src);
   });
 });
 
@@ -69,9 +77,14 @@ describe("object definition collapse", () => {
     expect(run(src, ["x = "])).toBe(`const x = { key: "val" };\n`);
   });
 
-  test("multi-property object → skipped, source unchanged", () => {
+  test("multi-property object → all properties joined onto one line", () => {
     const src = `const p = {\n  x: 0,\n  y: 1,\n};\n`;
-    expect(run(src, ["p = "])).toBe(src);
+    expect(run(src, ["p = "])).toBe(`const p = { x: 0, y: 1 };\n`);
+  });
+
+  test("property that is itself multiline → skipped (collapse would not be a one-liner)", () => {
+    const src = `const nested = {\n  inner: {\n    a: 0,\n    b: 1,\n  },\n};\n`;
+    expect(run(src, ["nested = "])).toBe(src);
   });
 });
 
@@ -81,9 +94,9 @@ describe("array definition collapse", () => {
     expect(run(src, ["ids = "])).toBe(`const ids = [1];\n`);
   });
 
-  test("multi-element array → skipped, source unchanged", () => {
+  test("multi-element array → all elements joined onto one line", () => {
     const src = `const pairs = [\n  "a",\n  "b",\n];\n`;
-    expect(run(src, ["pairs = "])).toBe(src);
+    expect(run(src, ["pairs = "])).toBe(`const pairs = ["a", "b"];\n`);
   });
 });
 
@@ -96,6 +109,15 @@ describe("comment guard", () => {
   test("type alias with block comment → skipped so no documentation is dropped", () => {
     const src = `${PREFIX}type Doc = {\n  /* the id */\n  id: string;\n};\n`;
     expect(run(src, ["type Doc"])).toBe(src);
+  });
+
+  test("leading comment above a declaration → still collapsed (comment is outside the replaced region)", () => {
+    // Regression: the guard used to inspect getFullText(), which includes leading
+    // trivia, so any declaration preceded by a `//` comment was skipped — even
+    // though the comment is never touched by the collapse. It now inspects only
+    // the replaced slice, so a preceding comment no longer blocks the fix.
+    const src = `// the prices\nconst prices = {\n  usd: 1,\n  eur: 0.9,\n};\n`;
+    expect(run(src, ["prices = "])).toBe(`// the prices\nconst prices = { usd: 1, eur: 0.9 };\n`);
   });
 });
 
