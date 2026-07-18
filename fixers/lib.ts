@@ -127,10 +127,175 @@ function declarationAtOffset(sf: ts.SourceFile, offset: number): ts.TypeAliasDec
   return best;
 }
 
-/** Strip leading/trailing whitespace and a single trailing semicolon (for
- *  TypeScript type members, which carry their own semicolons). */
+/** Strip leading/trailing whitespace and a single trailing separator (`;` or
+ *  `,`) — TypeScript type members carry their own separator. */
 function trimMember(text: string): string {
-  return text.trim().replace(/;$/, "");
+  return text.trim().replace(/[;,]$/, "");
+}
+
+/** True when `text` carries a line or block comment, so collapsing it would
+ *  silently drop documentation. (Substring check, matching the grit rule.) */
+function hasComment(text: string): boolean {
+  return text.includes("//") || text.includes("/*");
+}
+
+// ---------------------------------------------------------------------------
+// Recursive collapse: braced blocks may nest (`{ a: { b: T } }`, an object
+// literal whose property value is itself a multiline object). The diagnostic
+// only flags the outermost variable declarator / type alias, so to make the
+// outer a genuine one-liner we must collapse each nested multiline block first
+// and splice it into the parent's text. Each helper returns the one-line text,
+// or `undefined` when the result would still span lines (a member/element is
+// itself multiline and not a collapsible block) or a comment would be dropped —
+// propagating `undefined` skips the whole outer node, keeping the fixer
+// idempotent.
+// ---------------------------------------------------------------------------
+
+/** Collapse a braced *type* block — a `TypeLiteralNode` (`{ a: T; b: U }`) or a
+ *  `MappedTypeNode` (`{ [K in keyof T]?: U }`) — to one line, recursively
+ *  collapsing nested multiline type blocks in its members/body. */
+function collapseTypeBlock(node: ts.TypeLiteralNode | ts.MappedTypeNode, sf: ts.SourceFile): string | undefined {
+  if (hasComment(node.getText(sf))) return undefined;
+  if (ts.isTypeLiteralNode(node)) {
+    if (node.members.length === 0) return undefined;
+    const parts: string[] = [];
+    for (const m of node.members) {
+      const t = collapseTypeText(m, sf);
+      if (t === undefined) return undefined;
+      parts.push(trimMember(t));
+    }
+    const collapsed = `{ ${parts.join("; ")} }`;
+    return collapsed.includes("\n") ? undefined : collapsed;
+  }
+  // MappedTypeNode: `{ [K in keyof T]?: U }` — a single clause, optionally
+  // `readonly`/`+readonly`/`-readonly`, an `as Name` clause, and `?`/`+?`/`-?`.
+  // Collapse is just joining the bracket, `?`, colon, and body on one line.
+  // The node's text includes its own trailing `;` (verified against the TS
+  // AST), so reconstructing without it leaves a clean one-liner.
+  const ro = node.readonlyToken?.getText(sf);
+  const tp = node.typeParameter.getText(sf);
+  let nameClause = "";
+  if (node.nameType) {
+    const nt = collapseTypeText(node.nameType, sf);
+    if (nt === undefined) return undefined;
+    nameClause = ` as ${nt}`;
+  }
+  const q = node.questionToken?.getText(sf) ?? "";
+  let body = "";
+  if (node.type) {
+    const bt = collapseTypeText(node.type, sf);
+    if (bt === undefined) return undefined;
+    body = bt;
+  }
+  const collapsed = `{ ${ro ? `${ro} ` : ""}[${tp}${nameClause}]${q}: ${body} }`;
+  return collapsed.includes("\n") ? undefined : collapsed;
+}
+
+/** Return `node`'s text with every nested multiline type block (TypeLiteral or
+ *  MappedType) spliced in as its collapsed one-liner — innermost first so each
+ *  splice uses already-collapsed text. `undefined` propagates a nested block
+ *  that can't collapse; a non-block newline (e.g. inside `Array<…>`) is left in
+ *  the returned text for the caller to detect via `.includes("\n")`. */
+function collapseTypeText(node: ts.Node, sf: ts.SourceFile): string | undefined {
+  let text = node.getText(sf);
+  const blocks: Array<ts.TypeLiteralNode | ts.MappedTypeNode> = [];
+  const walk = (n: ts.Node): void => {
+    n.forEachChild((c) => {
+      if ((ts.isTypeLiteralNode(c) || ts.isMappedTypeNode(c)) && c.getText(sf).includes("\n")) blocks.push(c);
+      else walk(c);
+    });
+  };
+  walk(node);
+  blocks.sort((a, b) => b.getStart(sf) - a.getStart(sf));
+  for (const blk of blocks) {
+    const c = collapseTypeBlock(blk, sf);
+    if (c === undefined) return undefined;
+    const relStart = blk.getStart(sf) - node.getStart(sf);
+    const relEnd = blk.getEnd() - node.getStart(sf);
+    text = text.slice(0, relStart) + c + text.slice(relEnd);
+  }
+  return text;
+}
+
+/** Collapse an `ObjectLiteralExpression` or `ArrayLiteralExpression` to one
+ *  line, recursively collapsing nested multiline object/array literals in its
+ *  properties/elements. */
+function collapseLiteral(node: ts.ObjectLiteralExpression | ts.ArrayLiteralExpression, sf: ts.SourceFile): string | undefined {
+  if (hasComment(node.getText(sf))) return undefined;
+  if (ts.isObjectLiteralExpression(node)) {
+    if (node.properties.length === 0) return undefined;
+    const parts: string[] = [];
+    for (const p of node.properties) {
+      const t = collapseProperty(p, sf);
+      if (t === undefined) return undefined;
+      parts.push(t.trim());
+    }
+    const collapsed = `{ ${parts.join(", ")} }`;
+    return collapsed.includes("\n") ? undefined : collapsed;
+  }
+  if (node.elements.length === 0) return undefined;
+  const parts: string[] = [];
+  for (const e of node.elements) {
+    const t = collapseExprValue(e, sf);
+    if (t === undefined) return undefined;
+    parts.push(t.trim());
+  }
+  const collapsed = `[${parts.join(", ")}]`;
+  return collapsed.includes("\n") ? undefined : collapsed;
+}
+
+/** Reconstruct one object-literal property with its value's nested multiline
+ *  literals collapsed. Method/getter/setter properties carry a multiline body
+ *  and cannot become a one-liner, so they skip the whole object. */
+function collapseProperty(p: ts.ObjectLiteralElementLike, sf: ts.SourceFile): string | undefined {
+  if (ts.isPropertyAssignment(p)) {
+    const name = collapseExprText(p.name, sf);
+    if (name === undefined) return undefined;
+    const val = collapseExprValue(p.initializer, sf);
+    if (val === undefined) return undefined;
+    return `${name}: ${val}`;
+  }
+  if (ts.isShorthandPropertyAssignment(p)) return collapseExprText(p.name, sf);
+  if (ts.isSpreadAssignment(p)) {
+    const expr = collapseExprText(p.expression, sf);
+    return expr === undefined ? undefined : `...${expr}`;
+  }
+  return undefined; // MethodDeclaration / get / set — multiline body.
+}
+
+/** Collapse an expression-position node: a literal recurses; anything else has
+ *  its nested multiline object/array literals spliced in. A literal that is
+ *  already single-line is preserved verbatim. */
+function collapseExprValue(node: ts.Node, sf: ts.SourceFile): string | undefined {
+  if (ts.isObjectLiteralExpression(node) || ts.isArrayLiteralExpression(node)) {
+    const text = node.getText(sf);
+    if (hasComment(text)) return undefined;
+    return text.includes("\n") ? collapseLiteral(node, sf) : text;
+  }
+  return collapseExprText(node, sf);
+}
+
+/** Return `node`'s text with every nested multiline object/array literal
+ *  spliced in as its collapsed one-liner (innermost first). */
+function collapseExprText(node: ts.Node, sf: ts.SourceFile): string | undefined {
+  let text = node.getText(sf);
+  const lits: Array<ts.ObjectLiteralExpression | ts.ArrayLiteralExpression> = [];
+  const walk = (n: ts.Node): void => {
+    n.forEachChild((c) => {
+      if ((ts.isObjectLiteralExpression(c) || ts.isArrayLiteralExpression(c)) && c.getText(sf).includes("\n")) lits.push(c);
+      else walk(c);
+    });
+  };
+  walk(node);
+  lits.sort((a, b) => b.getStart(sf) - a.getStart(sf));
+  for (const lit of lits) {
+    const c = collapseLiteral(lit, sf);
+    if (c === undefined) return undefined;
+    const relStart = lit.getStart(sf) - node.getStart(sf);
+    const relEnd = lit.getEnd() - node.getStart(sf);
+    text = text.slice(0, relStart) + c + text.slice(relEnd);
+  }
+  return text;
 }
 
 /** Result of rewriting one source file. */
@@ -151,19 +316,24 @@ export interface PlanResult {
  *
  *   type Foo = {\n  a: T\n  b: U\n}            →  type Foo = { a: T; b: U }
  *   export type Bar = Foo & {\n  x: T\n}        →  export type Bar = Foo & { x: T }
+ *   type Mapped<T> = {\n  [K in keyof T]?: T[K]\n}  →  type Mapped<T> = { [K in keyof T]?: T[K] }
  *   const x = {\n  k: v\n  k2: v2\n}            →  const x = { k: v, k2: v2 }
  *   const x = [\n  a\n  b\n]                    →  const x = [a, b]
  *
- * For type aliases only each multiline `{ … }` block is rewritten, so `export`,
- * the name, type parameters, and any intersection/union members are preserved —
- * the alias need not be a bare type literal. Variables rewrite only the
- * initializer for the same reason.
+ * For type aliases only each multiline `{ … }` block (a type literal OR a
+ * mapped type) is rewritten, so `export`, the name, type parameters, and any
+ * intersection/union members are preserved — the alias need not be a bare type
+ * literal. Variables rewrite only the initializer for the same reason.
+ *
+ * Nested multiline blocks are collapsed recursively: `const x = { y: { a: 1 } }`
+ * collapses the inner object first so the outer becomes a genuine one-liner.
  *
  * A collapse is only emitted when the result is a genuine single line. A node
- * whose member/element is itself multiline (e.g. a union nested inside
- * `Array<…>`) yields a collapsed text that still spans multiple lines; rewriting
- * its outer braces would not silence the diagnostic and would make the fixer
- * non-idempotent (re-"fixing" the same site every run). Such nodes are skipped.
+ * whose member/element is itself multiline AND not a collapsible block (e.g. a
+ * union nested inside `Array<…>`) yields a collapsed text that still spans
+ * multiple lines; rewriting its outer braces would not silence the diagnostic
+ * and would make the fixer non-idempotent (re-"fixing" the same site every run).
+ * Such nodes are skipped.
  *
  * Nodes whose text contains a comment are also skipped so no documentation is
  * silently dropped.
@@ -180,70 +350,40 @@ export function planFileEdits(fileName: string, source: string, offsets: readonl
     if (node === undefined) continue;
 
     if (ts.isTypeAliasDeclaration(node)) {
-      // Collapse every multiline type literal *within* the alias's type, rather
-      // than reconstructing the whole declaration. This preserves the `export`
-      // keyword, the alias name, type parameters, and any surrounding
-      // intersection/union members (`Foo & { … }`, `Foo | { … }`), only joining
-      // each `{ … }` block's members onto one line. An alias whose type is
-      // itself a literal, an intersection, or a union is handled uniformly.
-      const literals: ts.TypeLiteralNode[] = [];
+      // Collect the OUTERMOST multiline braced type blocks within the alias's
+      // type — type literals (`{ a: T }`) and mapped types (`{ [K in keyof T]:
+      // U }`). Each is collapsed recursively (its own nested blocks collapse
+      // with it), so we never descend into a block we're already collapsing —
+      // that would produce overlapping edits. This preserves `export`, the
+      // name, type params, and surrounding intersection/union members.
+      const blocks: Array<ts.TypeLiteralNode | ts.MappedTypeNode> = [];
       const collect = (n: ts.Node): void => {
-        if (ts.isTypeLiteralNode(n) && n.getText(sf).includes("\n")) literals.push(n);
+        if ((ts.isTypeLiteralNode(n) || ts.isMappedTypeNode(n)) && n.getText(sf).includes("\n")) {
+          blocks.push(n);
+          return;
+        }
         ts.forEachChild(n, collect);
       };
       collect(node.type);
-      for (const lit of literals) {
-        const litText = lit.getText(sf);
-        // Skip when the literal carries a comment, so no documentation is dropped.
-        if (litText.includes("//") || litText.includes("/*")) continue;
-        if (lit.members.length === 0) continue;
-        const members = lit.members.map((m) => trimMember(m.getText(sf)));
-        const collapsed = `{ ${members.join("; ")} }`;
-        // Only emit when the result is a genuine one-liner. A member that is
-        // itself multiline leaves a newline in the joined text; collapsing the
-        // outer braces wouldn't silence the diagnostic and would make the fixer
-        // re-"fix" the same site on every run (non-idempotent). Skip those.
-        if (collapsed.includes("\n")) continue;
-        edits.push({ start: lit.getStart(sf), end: lit.getEnd(), text: collapsed, seq: seq++ });
+      for (const blk of blocks) {
+        const collapsed = collapseTypeBlock(blk, sf);
+        if (collapsed === undefined) continue;
+        edits.push({ start: blk.getStart(sf), end: blk.getEnd(), text: collapsed, seq: seq++ });
       }
       continue;
     }
 
-    // VariableDeclaration: collapse only the initializer, so `export`/`const`/
-    // the name/any type annotation are preserved.
+    // VariableDeclaration: collapse only the initializer (recursively), so
+    // `export`/`const`/the name/any type annotation are preserved.
     const init = node.initializer;
     if (init === undefined) continue;
+    if (!ts.isObjectLiteralExpression(init) && !ts.isArrayLiteralExpression(init)) continue;
 
-    // The exact source slice that will be replaced, so the comment guard below
-    // only flags comments that would actually be dropped — not leading trivia
-    // (a `//` line above the declaration) which the edit never touches.
-    const replaced = init.getText(sf);
-    let editStart: number;
-    let editEnd: number;
-    let collapsed: string | undefined;
-    if (ts.isObjectLiteralExpression(init)) {
-      if (init.properties.length === 0) continue;
-      const props = init.properties.map((p) => p.getText(sf).trim());
-      editStart = init.getStart(sf);
-      editEnd = init.getEnd();
-      collapsed = `{ ${props.join(", ")} }`;
-    } else if (ts.isArrayLiteralExpression(init)) {
-      if (init.elements.length === 0) continue;
-      const elems = init.elements.map((e) => e.getText(sf).trim());
-      editStart = init.getStart(sf);
-      editEnd = init.getEnd();
-      collapsed = `[${elems.join(", ")}]`;
-    } else continue;
-
-    // Defensive: skip when the replaced region carries a comment, so no
-    // documentation is silently dropped.
-    if (replaced.includes("//") || replaced.includes("/*")) continue;
-
-    // Only emit when the result is a genuine one-liner (see the type-literal
-    // note above for why non-one-liners are skipped).
-    if (collapsed.includes("\n")) continue;
-
-    edits.push({ start: editStart, end: editEnd, text: collapsed, seq: seq++ });
+    const collapsed = collapseLiteral(init, sf);
+    // `undefined` or a still-multiline result means the outer can't be a
+    // genuine one-liner — skip to stay idempotent (see the doc comment above).
+    if (collapsed === undefined || collapsed.includes("\n")) continue;
+    edits.push({ start: init.getStart(sf), end: init.getEnd(), text: collapsed, seq: seq++ });
   }
 
   if (edits.length === 0) return { output: source, count: 0 };
