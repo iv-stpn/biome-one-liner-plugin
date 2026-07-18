@@ -1,5 +1,11 @@
 # biome-one-liner-plugin
 
+## 1.4.2
+
+### Patch Changes
+
+- 7b218e7: Move `@typescript/typescript6` from devDependencies to dependencies so the `collapse-object-definitions` fixer is runnable directly from a consuming project (not just from a checkout of this repo). Document the fixer — and how to invoke it — in the README.
+
 ## 1.4.1
 
 ### Patch Changes
