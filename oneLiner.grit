@@ -15,8 +15,10 @@ language js
 //
 // Warn (no automatic fix) on multiline definitions:
 //   type Foo = {\n...\n}         ->  warn: may fit on one line
-//   const x = {\n…\n}            ->  warn: may fit on one line
-//   const x = [\n…\n]            ->  warn: may fit on one line
+//   const x = {\n…\n}            ->  warn: may fit on one line (only if it fits)
+//   const x = [\n…\n]            ->  warn: may fit on one line (only if it fits)
+// The object/array warnings are gated on fits_on_one_line, so they stay silent
+// when the definition's content alone exceeds the line width.
 //
 // A block is left untouched (or a type declaration is not warned) when it:
 //   - is itself a control-flow statement (if / for / while / do-while /
@@ -64,6 +66,24 @@ pattern has_comment() {
 // (no methods, no index signatures, no mapped types).
 pattern single_member_object_type($member) {
     TsObjectType(members=[$member])
+}
+
+// A node whose collapsed one-liner would fit within Biome's default line width
+// (80 columns). The "may fit on one line" warnings below are only useful when
+// the one-liner actually fits, so they gate on this.
+//
+// GritQL cannot read the consumer's configured `lineWidth` and cannot collapse
+// whitespace to measure the exact one-liner, so this bounds the count of
+// non-whitespace characters in the node's source text instead. The collapsed
+// one-liner retains every non-whitespace character (only whitespace runs
+// shrink), so once that count exceeds the line width the one-liner cannot fit
+// and a "may fit" warning would be wrong. This is a conservative necessary
+// condition: it stays silent on some definitions that would fit (notably in
+// configs wider than 80, and multiline nodes whose raw text is long but whose
+// one-liner is short), but it never warns on a definition whose own content is
+// too long for the line. Bump the `{0,80}` repetition to match a wider config.
+pattern fits_on_one_line() {
+    r"^\s*(?:[^\s]\s*){0,80}$"
 }
 
 or {
@@ -248,16 +268,22 @@ else $s`
     },
 
     // `const x = {\n  …\n}` — multiline object initializer in a variable declaration.
+    // Only warned when the collapsed one-liner would fit (see fits_on_one_line),
+    // so the "may fit on one line" advice is never given for a definition whose
+    // content alone exceeds the line width.
     JsVariableDeclarator(initializer=JsInitializerClause(expression=JsObjectExpression() as $expr)) as $decl where {
         $decl <: r"[\s\S]*\n[\s\S]*",
         not $decl <: has_comment(),
+        $decl <: fits_on_one_line(),
         register_diagnostic(span=$decl, message="This object definition spans multiple lines and may fit on one line.", severity="warn")
     },
 
     // `const x = [\n  …\n]` — multiline array initializer in a variable declaration.
+    // Gated the same way as the object initializer above.
     JsVariableDeclarator(initializer=JsInitializerClause(expression=JsArrayExpression() as $expr)) as $decl where {
         $decl <: r"[\s\S]*\n[\s\S]*",
         not $decl <: has_comment(),
+        $decl <: fits_on_one_line(),
         register_diagnostic(span=$decl, message="This array definition spans multiple lines and may fit on one line.", severity="warn")
     }
 }
