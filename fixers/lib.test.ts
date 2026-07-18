@@ -92,6 +92,35 @@ describe("type alias collapse", () => {
     const src = `${PREFIX}type Result = Ok | {\n  error: string;\n  code: number;\n};\n`;
     expect(run(src, ["type Result"])).toBe(`${PREFIX}type Result = Ok | { error: string; code: number };\n`);
   });
+
+  test("mapped type alias → collapsed to one line (mapped types are not type literals)", () => {
+    // Regression: `{ [K in keyof T]?: U }` parses as a MappedTypeNode, not a
+    // TypeLiteralNode, so the old `isTypeLiteralNode` collector skipped every
+    // mapped-type alias — leaving the diagnostic unfixed.
+    const src = `${PREFIX}type MotiStyle = {\n  [K in keyof BaseStyle]?: BaseStyle[K] | BaseStyle[K][];\n};\n`;
+    expect(run(src, ["type MotiStyle"])).toBe(
+      `${PREFIX}type MotiStyle = { [K in keyof BaseStyle]?: BaseStyle[K] | BaseStyle[K][] };\n`,
+    );
+  });
+
+  test("mapped type alias in an intersection → only the mapped block collapsed", () => {
+    const src = `${PREFIX}type MotiTransition<Animate = MotiStyle> = MotiTransitionConfig & {\n  [K in keyof Animate]?: MotiTransitionConfig;\n};\n`;
+    expect(run(src, ["type MotiTransition"])).toBe(
+      `${PREFIX}type MotiTransition<Animate = MotiStyle> = MotiTransitionConfig & { [K in keyof Animate]?: MotiTransitionConfig };\n`,
+    );
+  });
+
+  test("readonly mapped type with `as` clause → modifiers and clause preserved on one line", () => {
+    const src = `${PREFIX}type Getters<T> = {\n  readonly [K in keyof T as \`get\${Capitalize<K>}\`]: () => T[K];\n};\n`;
+    expect(run(src, ["type Getters"])).toBe(
+      `${PREFIX}type Getters<T> = { readonly [K in keyof T as \`get\${Capitalize<K>}\`]: () => T[K] };\n`,
+    );
+  });
+
+  test("nested multiline type literal → collapsed recursively in one pass", () => {
+    const src = `${PREFIX}type Nested = {\n  outer: {\n    inner: number;\n  };\n};\n`;
+    expect(run(src, ["type Nested"])).toBe(`${PREFIX}type Nested = { outer: { inner: number } };\n`);
+  });
 });
 
 describe("object definition collapse", () => {
@@ -106,9 +135,33 @@ describe("object definition collapse", () => {
     expect(run(src, ["p = "])).toBe(`const p = { x: 0, y: 1 };\n`);
   });
 
-  test("property that is itself multiline → skipped (collapse would not be a one-liner)", () => {
+  test("nested multiline object literal → collapsed recursively (outer becomes a one-liner)", () => {
+    // Regression: the fixer used to take each property's raw text, so a nested
+    // multiline object left a newline in the joined result and the outer was
+    // skipped — leaving the diagnostic unfixed. It now collapses the inner
+    // first and splices it in, so the outer becomes a genuine one-liner.
     const src = `const nested = {\n  inner: {\n    a: 0,\n    b: 1,\n  },\n};\n`;
+    expect(run(src, ["nested = "])).toBe(`const nested = { inner: { a: 0, b: 1 } };\n`);
+  });
+
+  test("nested multiline array literal → collapsed recursively", () => {
+    const src = `const matrix = {\n  rows: [\n    [1, 2],\n    [3, 4],\n  ],\n};\n`;
+    expect(run(src, ["matrix = "])).toBe(`const matrix = { rows: [[1, 2], [3, 4]] };\n`);
+  });
+
+  test("nested multiline object inside a call-argument value → collapsed recursively", () => {
+    const src = `const cfg = {\n  headers: build({\n    a: 1,\n    b: 2,\n  }),\n};\n`;
+    expect(run(src, ["cfg = "])).toBe(`const cfg = { headers: build({ a: 1, b: 2 }) };\n`);
+  });
+
+  test("nested object with a comment → whole outer skipped (no documentation dropped)", () => {
+    const src = `const nested = {\n  inner: {\n    // keep\n    a: 0,\n  },\n};\n`;
     expect(run(src, ["nested = "])).toBe(src);
+  });
+
+  test("property whose value is a method → skipped (multiline body is not collapsible)", () => {
+    const src = `const obj = {\n  fn() {\n    return 1;\n  },\n};\n`;
+    expect(run(src, ["obj = "])).toBe(src);
   });
 });
 
