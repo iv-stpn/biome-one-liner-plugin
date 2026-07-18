@@ -1,0 +1,9 @@
+# Ensure bun.lock is up to date. If bun install changed it, commit the
+# updated lockfile before allowing the push to proceed.
+bun install --no-frozen-lockfile >/dev/null 2>&1
+
+if ! git diff --quiet -- bun.lock; then
+  echo "pre-push: bun.lock is out of date — committing the updated lockfile"
+  git add bun.lock
+  git commit -m "chore: update bun.lock" --no-verify
+fi
