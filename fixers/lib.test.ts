@@ -48,6 +48,18 @@ describe("type alias collapse", () => {
     const src = `${PREFIX}type A = {\n  p: number;\n};\ntype B = {\n  q: string;\n};\n`;
     expect(run(src, ["type A", "type B"])).toBe(`${PREFIX}type A = { p: number };\ntype B = { q: string };\n`);
   });
+
+  test("multi-member type alias → skipped, source unchanged (no members dropped)", () => {
+    // Regression: the fixer used to collapse this to the first member only,
+    // silently dropping every member after it. It must leave it intact.
+    const src = `${PREFIX}type Point = {\n  x: number;\n  y: number;\n};\n`;
+    expect(run(src, ["type Point"])).toBe(src);
+  });
+
+  test("multi-member generic type alias → skipped, source unchanged", () => {
+    const src = `${PREFIX}type Choice<T> = {\n  a: T;\n  b: string;\n  c: number;\n};\n`;
+    expect(run(src, ["type Choice"])).toBe(src);
+  });
 });
 
 describe("object definition collapse", () => {

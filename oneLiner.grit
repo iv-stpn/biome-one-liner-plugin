@@ -260,10 +260,14 @@ else $s`
         $type_decl => `type $name$tparams = { $member }`
     },
 
-    // Multi-member or non-object `type Foo = …` declaration → warn only (fixer handles it).
+    // Multi-member or non-object `type Foo = …` declaration → warn only. Gated
+    // on fits_on_one_line so a definition whose own content exceeds the line
+    // width (summed across every line of the node, not just the first) stays
+    // silent: the "may fit on one line" advice is only useful when it can.
     TsTypeAliasDeclaration() as $type_decl where {
         $type_decl <: r"[\s\S]*\n[\s\S]*",
         not $type_decl <: has_comment(),
+        $type_decl <: fits_on_one_line(),
         register_diagnostic(span=$type_decl, message="This type alias spans multiple lines and may fit on one line.", severity="warn")
     },
 

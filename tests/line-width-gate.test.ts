@@ -54,6 +54,7 @@ function withPluginDir(): string {
 
 const OBJ = "This object definition spans multiple lines";
 const ARR = "This array definition spans multiple lines";
+const TYPE = "This type alias spans multiple lines";
 
 describe("line-width gate on multiline definition warnings", () => {
   test("small multiline object/array are warned; oversized ones are not", () => {
@@ -115,6 +116,43 @@ describe("line-width gate on multiline definition warnings", () => {
       const report = lintJson(dir, file);
       const messages = (report.diagnostics ?? []).map((d) => d.message ?? "");
       expect(messages.some((m) => m.includes(OBJ))).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("a multiline type alias is warned only when its content fits on one line", () => {
+    // Regression: the multi-member type-alias warning used to fire unconditionally
+    // for every multiline alias. It must be gated on the line width, summing the
+    // non-whitespace columns across every line of the node — not just the first.
+    const dir = withPluginDir();
+    try {
+      const file = join(dir, "sample.ts");
+      writeFileSync(
+        file,
+        [
+          // Small: content fits within the line width → warned.
+          'type Point = {',
+          '  x: number;',
+          '  y: number;',
+          '};',
+          // Oversized: content alone exceeds the line width → not warned.
+          'type ChoiceTabProps<T extends string = string> = {',
+          '  item: { id: T; label: string };',
+          '  isActive: boolean;',
+          "  align: 'start' | 'center' | 'stretch';",
+          '  onChange: (id: T) => void;',
+          '  handleLayout: (id: T) => (event: LayoutChangeEvent) => void;',
+          '};',
+          '',
+        ].join("\n"),
+      );
+      const report = lintJson(dir, file);
+      const messages = (report.diagnostics ?? []).map((d) => d.message ?? "");
+      const typeWarnings = messages.filter((m) => m.includes(TYPE));
+      // Exactly one warning — the small `Point` alias. The oversized
+      // `ChoiceTabProps` alias is gated out.
+      expect(typeWarnings).toHaveLength(1);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

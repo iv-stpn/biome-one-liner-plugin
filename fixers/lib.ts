@@ -172,10 +172,15 @@ export function planFileEdits(fileName: string, source: string, offsets: readonl
       const type = node.type;
       if (!ts.isTypeLiteralNode(type)) continue;
 
-      const firstMember = type.members[0];
-      if (!firstMember) continue;
+      // Only single-member type aliases are collapsible. A multi-member alias is
+      // warned ("may fit on one line") but must be left intact: collapsing it to
+      // the first member would silently drop every member after it.
+      if (type.members.length !== 1) continue;
 
-      const memberText = trimMember(firstMember.getText(sf));
+      const member = type.members[0];
+      if (!member) continue;
+
+      const memberText = trimMember(member.getText(sf));
       const name = node.name.text;
       const tparams = node.typeParameters ? `<${node.typeParameters.map((p) => p.getText(sf)).join(", ")}>` : "";
       editStart = node.getStart(sf);
