@@ -157,4 +157,34 @@ describe("line-width gate on multiline definition warnings", () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  test("a small object under a long name + type annotation is not warned", () => {
+    // Regression: the fit gate used to measure only the declarator (name +
+    // type + `=` + object), which lands exactly at the 110-column boundary for
+    // a small object whose full statement — including the `const` keyword and
+    // trailing `;` — actually exceeds the line width. The "may fit on one line"
+    // advice is wrong there, so the gate must measure the full variable
+    // statement, not just the declarator.
+    const dir = withPluginDir();
+    try {
+      const file = join(dir, "sample.ts");
+      writeFileSync(
+        file,
+        [
+          'const freeUnitsByPlan: Record<PlanId, number | null> = {',
+          '  just_exploring: null,',
+          '  pay_as_you_go: null,',
+          '  starter: null,',
+          '  premium: null,',
+          '};',
+          '',
+        ].join("\n"),
+      );
+      const report = lintJson(dir, file);
+      const messages = (report.diagnostics ?? []).map((d) => d.message ?? "");
+      expect(messages.some((m) => m.includes(OBJ))).toBe(false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });

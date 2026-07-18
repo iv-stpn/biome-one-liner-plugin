@@ -258,22 +258,30 @@ else $s`
     },
 
     // `const x = {\n  …\n}` — multiline object initializer in a variable declaration.
-    // Only warned when the collapsed one-liner would fit (see fits_on_one_line),
-    // so the "may fit on one line" advice is never given for a definition whose
-    // content alone exceeds the line width.
-    JsVariableDeclarator(initializer=JsInitializerClause(expression=JsObjectExpression() as $expr)) as $decl where {
-        $decl <: r"[\s\S]*\n[\s\S]*",
-        not $decl <: has_comment(),
-        $decl <: fits_on_one_line(),
+    // Only warned when the collapsed one-liner would fit (see fits_on_one_line).
+    //
+    // The fit gate is measured against the FULL variable statement — the
+    // `const`/`let`/`var` keyword, the name, the type annotation, the `=`, the
+    // object, and the trailing `;` — not just the object expression. The
+    // collapsed one-liner re-emits every one of those, so a definition whose
+    // declarator alone fits but whose full statement exceeds the line width
+    // (a long name + type annotation over a small object, e.g.
+    // `const freeUnitsByPlan: Record<PlanId, number | null> = { … }`) is
+    // correctly left silent instead of being told it "may fit on one line".
+    JsVariableStatement(declaration=JsVariableDeclaration(declarators=[JsVariableDeclarator(initializer=JsInitializerClause(expression=JsObjectExpression())) as $decl])) as $stmt where {
+        $stmt <: r"[\s\S]*\n[\s\S]*",
+        not $stmt <: has_comment(),
+        $stmt <: fits_on_one_line(),
         register_diagnostic(span=$decl, message="This object definition spans multiple lines and may fit on one line.", severity="warn")
     },
 
     // `const x = [\n  …\n]` — multiline array initializer in a variable declaration.
-    // Gated the same way as the object initializer above.
-    JsVariableDeclarator(initializer=JsInitializerClause(expression=JsArrayExpression() as $expr)) as $decl where {
-        $decl <: r"[\s\S]*\n[\s\S]*",
-        not $decl <: has_comment(),
-        $decl <: fits_on_one_line(),
+    // Gated the same way as the object initializer above: the fit gate measures
+    // the full variable statement, not just the array expression.
+    JsVariableStatement(declaration=JsVariableDeclaration(declarators=[JsVariableDeclarator(initializer=JsInitializerClause(expression=JsArrayExpression())) as $decl])) as $stmt where {
+        $stmt <: r"[\s\S]*\n[\s\S]*",
+        not $stmt <: has_comment(),
+        $stmt <: fits_on_one_line(),
         register_diagnostic(span=$decl, message="This array definition spans multiple lines and may fit on one line.", severity="warn")
     }
 }
