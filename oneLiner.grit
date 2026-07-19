@@ -19,8 +19,9 @@ language js
 //   const x = [\n…\n]            ->  warn: may fit on one line (only if it fits)
 // The object/array warnings are gated on fits_on_one_line, so they stay silent
 // when the definition's content alone exceeds the line width. The array
-// warning is additionally silent when every element is a multi-key object —
-// a table of records is clearer kept one-entry-per-line.
+// warning is additionally silent when every element is record-like (a
+// multi-key object or a multi-element array) — a table of records is clearer
+// kept one-entry-per-line.
 //
 // A block is left untouched (or a type declaration is not warned) when it:
 //   - is itself a control-flow statement (if / for / while / do-while /
@@ -82,13 +83,17 @@ pattern fits_on_one_line() {
     r"^\s*(?:[^\s]\s*){0,110}$"
 }
 
-// An object literal with at least two properties. Used by the array rule
-// below: a multiline array whose every element is a multi-key object is a
-// table of records, which stays clearer one-entry-per-line than collapsed, so
-// it is not warned. An array holding anything else — a single-key object, a
-// primitive, a spread — is warned as before.
-pattern multi_key_object() {
-    JsObjectExpression(members=[$_, $_, ...])
+// A record-like element: an object literal with at least two properties, or
+// an array with at least two elements (a tuple). Used by the array rule
+// below: a multiline array whose every element is record-like is a table of
+// records, which stays clearer one-entry-per-line than collapsed, so it is
+// not warned. An array holding anything else — a single-key object, a
+// single-element array, a primitive, a spread — is warned as before.
+pattern record_like_element() {
+    or {
+        JsObjectExpression(members=[$_, $_, ...]),
+        JsArrayExpression(elements=[$_, $_, ...])
+    }
 }
 
 or {
@@ -290,21 +295,22 @@ else $s`
     // Gated the same way as the object initializer above: the fit gate measures
     // the full variable statement, not just the array expression.
     //
-    // Additionally suppressed when every element is a multi-key object: such an
-    // array is a table of records, which stays clearer one-entry-per-line than
-    // collapsed into one long line. The check uses `every` on the array's own
-    // element list (not `contains`), so it judges only the direct elements — a
-    // single-key object nested inside a record does not re-trigger the warning,
-    // while a single-key object, a primitive, or a spread as a direct element
-    // does. An empty multiline array matches `every` vacuously, so the second
-    // disjunct (`not some`) keeps it warned — there are no records to keep
-    // one-per-line.
+    // Additionally suppressed when every element is record-like (a multi-key
+    // object or a multi-element array): such an array is a table of records,
+    // which stays clearer one-entry-per-line than collapsed into one long
+    // line. The check uses `every` on the array's own element list (not
+    // `contains`), so it judges only the direct elements — a single-key
+    // object nested inside a record does not re-trigger the warning, while a
+    // single-key object, a single-element array, a primitive, or a spread as
+    // a direct element does. An empty multiline array matches `every`
+    // vacuously, so the second disjunct (`not some`) keeps it warned — there
+    // are no records to keep one-per-line.
     JsVariableStatement(declaration=JsVariableDeclaration(declarators=[JsVariableDeclarator(initializer=JsInitializerClause(expression=JsArrayExpression(elements=$elements))) as $decl])) as $stmt where {
         $stmt <: r"[\s\S]*\n[\s\S]*",
         not $stmt <: has_comment(),
         $stmt <: fits_on_one_line(),
         or {
-            not $elements <: every multi_key_object(),
+            not $elements <: every record_like_element(),
             not $elements <: some $_
         },
         register_diagnostic(span=$decl, message="This array definition spans multiple lines and may fit on one line.", severity="warn")

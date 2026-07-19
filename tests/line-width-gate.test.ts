@@ -158,10 +158,11 @@ describe("line-width gate on multiline definition warnings", () => {
     }
   });
 
-  test("an array of multi-key objects is not warned; other arrays are", () => {
-    // A multiline array whose every element is a multi-key object is a table
-    // of records, clearer kept one-entry-per-line, so it is not warned. The
-    // warning still fires when any element is a single-key object or a
+  test("an array of record-like elements is not warned; other arrays are", () => {
+    // A multiline array whose every element is record-like (a multi-key
+    // object or a multi-element array) is a table of records, clearer kept
+    // one-entry-per-line, so it is not warned. The warning still fires when
+    // any element is a single-key object, a single-element array, or a
     // non-object — but a single-key object nested *inside* a record does not
     // re-trigger it.
     const dir = withPluginDir();
@@ -190,6 +191,16 @@ describe("line-width gate on multiline definition warnings", () => {
           '  { id: 1, meta: { x: 1 } },',
           '  { id: 2, meta: { y: 2 } },',
           '];',
+          // Table of tuples → not warned.
+          'const pairs: [string, string][] = [',
+          "  ['a', '1'],",
+          "  ['b', '2'],",
+          '];',
+          // One single-element array among the tuples → warned.
+          'const withSingleElem = [',
+          "  ['a', '1'],",
+          "  ['b'],",
+          '];',
           // Plain primitives → warned.
           'const plain = [',
           '  1,',
@@ -204,9 +215,10 @@ describe("line-width gate on multiline definition warnings", () => {
       const report = lintJson(dir, file);
       const messages = (report.diagnostics ?? []).map((d) => d.message ?? "");
       const arrWarnings = messages.filter((m) => m.includes(ARR));
-      // Exactly four warnings: withSingleKey, withPrimitive, plain, and empty.
-      // The two record tables (records, nestedRecords) are left silent.
-      expect(arrWarnings).toHaveLength(4);
+      // Exactly five warnings: withSingleKey, withPrimitive, withSingleElem,
+      // plain, and empty. The record tables (records, nestedRecords, pairs)
+      // are left silent.
+      expect(arrWarnings).toHaveLength(5);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
