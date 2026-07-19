@@ -18,7 +18,9 @@ language js
 //   const x = {\n…\n}            ->  warn: may fit on one line (only if it fits)
 //   const x = [\n…\n]            ->  warn: may fit on one line (only if it fits)
 // The object/array warnings are gated on fits_on_one_line, so they stay silent
-// when the definition's content alone exceeds the line width.
+// when the definition's content alone exceeds the line width. The array
+// warning is additionally silent when every element is a multi-key object —
+// a table of records is clearer kept one-entry-per-line.
 //
 // A block is left untouched (or a type declaration is not warned) when it:
 //   - is itself a control-flow statement (if / for / while / do-while /
@@ -78,6 +80,15 @@ pattern has_comment() {
 // too long for the line. Bump the `{0,110}` repetition to match a wider config.
 pattern fits_on_one_line() {
     r"^\s*(?:[^\s]\s*){0,110}$"
+}
+
+// An object literal with at least two properties. Used by the array rule
+// below: a multiline array whose every element is a multi-key object is a
+// table of records, which stays clearer one-entry-per-line than collapsed, so
+// it is not warned. An array holding anything else — a single-key object, a
+// primitive, a spread — is warned as before.
+pattern multi_key_object() {
+    JsObjectExpression(members=[$_, $_, ...])
 }
 
 or {
@@ -278,10 +289,24 @@ else $s`
     // `const x = [\n  …\n]` — multiline array initializer in a variable declaration.
     // Gated the same way as the object initializer above: the fit gate measures
     // the full variable statement, not just the array expression.
-    JsVariableStatement(declaration=JsVariableDeclaration(declarators=[JsVariableDeclarator(initializer=JsInitializerClause(expression=JsArrayExpression())) as $decl])) as $stmt where {
+    //
+    // Additionally suppressed when every element is a multi-key object: such an
+    // array is a table of records, which stays clearer one-entry-per-line than
+    // collapsed into one long line. The check uses `every` on the array's own
+    // element list (not `contains`), so it judges only the direct elements — a
+    // single-key object nested inside a record does not re-trigger the warning,
+    // while a single-key object, a primitive, or a spread as a direct element
+    // does. An empty multiline array matches `every` vacuously, so the second
+    // disjunct (`not some`) keeps it warned — there are no records to keep
+    // one-per-line.
+    JsVariableStatement(declaration=JsVariableDeclaration(declarators=[JsVariableDeclarator(initializer=JsInitializerClause(expression=JsArrayExpression(elements=$elements))) as $decl])) as $stmt where {
         $stmt <: r"[\s\S]*\n[\s\S]*",
         not $stmt <: has_comment(),
         $stmt <: fits_on_one_line(),
+        or {
+            not $elements <: every multi_key_object(),
+            not $elements <: some $_
+        },
         register_diagnostic(span=$decl, message="This array definition spans multiple lines and may fit on one line.", severity="warn")
     }
 }

@@ -158,6 +158,60 @@ describe("line-width gate on multiline definition warnings", () => {
     }
   });
 
+  test("an array of multi-key objects is not warned; other arrays are", () => {
+    // A multiline array whose every element is a multi-key object is a table
+    // of records, clearer kept one-entry-per-line, so it is not warned. The
+    // warning still fires when any element is a single-key object or a
+    // non-object — but a single-key object nested *inside* a record does not
+    // re-trigger it.
+    const dir = withPluginDir();
+    try {
+      const file = join(dir, "sample.ts");
+      writeFileSync(
+        file,
+        [
+          // Table of records → not warned.
+          'const records = [',
+          '  { id: 1, name: "a" },',
+          '  { id: 2, name: "b" },',
+          '];',
+          // One single-key object among the records → warned.
+          'const withSingleKey = [',
+          '  { id: 1, name: "a" },',
+          '  { id: 2 },',
+          '];',
+          // A non-object element → warned.
+          'const withPrimitive = [',
+          '  { id: 1, name: "a" },',
+          '  42,',
+          '];',
+          // Single-key object nested inside a record → still not warned.
+          'const nestedRecords = [',
+          '  { id: 1, meta: { x: 1 } },',
+          '  { id: 2, meta: { y: 2 } },',
+          '];',
+          // Plain primitives → warned.
+          'const plain = [',
+          '  1,',
+          '];',
+          // Empty multiline array → warned (no records to keep per-line).
+          'const empty = [',
+          '];',
+          '',
+        ].join("\n"),
+      );
+
+      const report = lintJson(dir, file);
+      const messages = (report.diagnostics ?? []).map((d) => d.message ?? "");
+      const arrWarnings = messages.filter((m) => m.includes(ARR));
+      // Exactly four warnings: withSingleKey, withPrimitive, plain, and empty.
+      // The two record tables (records, nestedRecords) are left silent.
+      expect(arrWarnings).toHaveLength(4);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   test("a small object under a long name + type annotation is not warned", () => {
     // Regression: the fit gate used to measure only the declarator (name +
     // type + `=` + object), which lands exactly at the 110-column boundary for
