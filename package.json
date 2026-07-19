@@ -1,6 +1,6 @@
 {
   "name": "biome-one-liner-plugin",
-  "version": "1.4.9",
+  "version": "1.4.10",
   "description": "Biome plugin that collapses single-statement blocks into one-liners.",
   "license": "ISC",
   "author": "Ivan Stepanian <iv.stpn@gmail.com>",
